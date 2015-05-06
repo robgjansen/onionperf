@@ -1,0 +1,288 @@
+#!/usr/bin/env python
+
+import sys, os, shutil, subprocess, multiprocessing, argparse, logging, stem, functools, time
+from signal import signal, SIGINT, SIG_IGN
+from stem import process, control
+from stem.control import EventType, Controller
+from stem.util import str_tools
+
+DESCRIPTION="""
+A utility to track the performance of hidden services in Tor.
+"""
+
+TGEN_SERVER_CONF="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key attr.name="time" attr.type="string" for="node" id="d1" />
+  <key attr.name="serverport" attr.type="string" for="node" id="d0" />
+  <graph edgedefault="directed">
+    <node id="start">
+      <data key="d0">8888</data>
+      <data key="d1">0</data>
+    </node>
+  </graph>
+</graphml>"""
+
+TGEN_CLIENT_CONF_TEMPLATE="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key attr.name="socksproxy" attr.type="string" for="node" id="d7" />
+  <key attr.name="serverport" attr.type="string" for="node" id="d6" />
+  <key attr.name="peers" attr.type="string" for="node" id="d5" />
+  <key attr.name="type" attr.type="string" for="node" id="d4" />
+  <key attr.name="protocol" attr.type="string" for="node" id="d3" />
+  <key attr.name="size" attr.type="string" for="node" id="d2" />
+  <key attr.name="count" attr.type="string" for="node" id="d1" />
+  <key attr.name="time" attr.type="string" for="node" id="d0" />
+  <graph edgedefault="directed">
+    <node id="start">
+      <data key="d5">{0}:80</data>
+      <data key="d6">8889</data>
+      <data key="d7">localhost:9001</data>
+    </node>
+    <node id="transfer">
+      <data key="d3">tcp</data>
+      <data key="d4">get</data>
+      <data key="d2">{1}</data>
+    </node>
+    <node id="end">
+      <data key="d0">1</data>
+    </node>
+    <edge source="start" target="transfer" />
+    <edge source="transfer" target="end" />
+    <edge source="end" target="start" />
+  </graph>
+</graphml>"""
+
+logging.basicConfig(format='[%(asctime)s] [onionperf] [%(levelname)s] %(message)s', level=logging.INFO)
+logging.getLogger("stem").setLevel(logging.INFO)
+
+class OnionPerf:
+    torpath = None
+    tgenpath = None
+    done_event = None
+    s_tor_datadir = None
+    s_tor_hsdir = None
+    s_tor_onionurl = None
+    s_tgen_process = None
+    c_tgen_process = None
+
+    def __init__(self, torpath, tgenpath):
+        self.torpath = torpath
+        self.tgenpath = tgenpath
+        self.done_event = multiprocessing.Event()
+
+    def run(self):
+        # if ctrl-c is pressed, shutdown child processes properly
+        try:
+            logging.info("Starting tgen server...")
+            self.__start_tgen_server()
+            logging.info("Starting tor hs server...")
+            self.__start_tor_server()
+            logging.info("Starting tor client...")
+            self.__start_tor_client()
+            logging.info("Starting tgen client...")
+            self.__start_tgen_client()
+
+            logging.info("Everything is running; sleeping now...")
+            time.sleep(3600*24*30)
+
+        except KeyboardInterrupt:
+            logging.info("Interrupt received")
+
+        finally:
+            logging.info("Cleaning up child processes now...")
+
+            self.done_event.set()
+            if self.c_tgen_process is not None: self.c_tgen_process.join()
+            if self.s_tgen_process is not None: self.s_tgen_process.join()
+
+            logging.info("Child processes terminated")
+            #logging.disable(logging.INFO)
+
+            if self.s_tor_hsdir is not None:
+                #self.server_tor_ctl.remove_hidden_service(self.server_hsdir)
+                shutil.rmtree(self.s_tor_hsdir)
+
+            #logging.disable(logging.NOTSET)
+            logging.info("Child process cleanup complete!")
+            logging.info("Exiting")
+
+    def __start_tgen_server(self):
+        self.s_tgen_process = multiprocessing.Process(target=OnionPerf.__tgen_server_main, args=(self,))
+        self.s_tgen_process.start()
+
+    def __tgen_server_main(self):
+        signal(SIGINT, SIG_IGN) # ignore interrupts
+        tgen_dir = ".onionperf/server/tgen"
+        if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
+        conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
+        if not os.path.exists(conffile):
+            with open(conffile, 'wb') as f:
+                print >>f, TGEN_SERVER_CONF,
+        with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
+            p = None
+            while not self.done_event.is_set():
+                if p is None or p.poll() is None: p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
+                self.done_event.wait(1)
+            if p is not None and p.poll() is not None: p.terminate()
+            p.wait()
+
+    def __start_tgen_client(self):
+        self.c_tgen_process = multiprocessing.Process(target=OnionPerf.__tgen_client_main, args=(self,))
+        self.c_tgen_process.start()
+
+    def __tgen_client_main(self):
+        signal(SIGINT, SIG_IGN) # ignore interrupts
+        tgen_dir = ".onionperf/client/tgen"
+        if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
+        conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
+        with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
+            p = None
+            while not self.done_event.is_set():
+                if p is None or p.poll() is None:
+                    if os.path.exists(conffile): os.remove(conffile)
+                    with open(conffile, 'wb') as f:
+                        print >>f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, "10 KiB"),
+                    p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
+                self.done_event.wait(1)
+            if p is not None and p.poll() is not None: p.terminate()
+            p.wait()
+
+    def __start_torctl_logger(self): pass
+
+    def __run_torctl_logger(ctlport):
+        signal(SIGINT, SIG_IGN) # ignore interrupts
+        with stem.control.Controller.from_port(port = ctlport) as torctl:
+            torctl.authenticate()
+            torctl.add_event_listener(tor_event_logger, stem.control.EventType.BW)
+
+    def __start_tor_client(self):
+        self.c_tor_datadir = ".onionperf/client/tor/data"
+        if not os.path.exists(self.c_tor_datadir): os.makedirs(self.c_tor_datadir)
+        os.chmod(self.c_tor_datadir, 0700)
+
+        config = {
+            'ORPort': '0',
+            'DirPort': '0',
+            'ControlPort': '9051',
+            'SocksPort': '9001',
+            'SocksListenAddress': '127.0.0.1',
+            'ClientOnly': '1',
+            'FascistFirewall': '1',
+            'WarnUnsafeSocks': '0',
+            'SafeLogging': '0',
+            'MaxCircuitDirtiness': '10 seconds',
+            'DataDirectory': self.c_tor_datadir,
+            'Log': [
+                'NOTICE stdout',
+                'INFO file .onionperf/client/tor/tor.log'.format(self.c_tor_datadir),
+            ],
+        }
+
+        tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
+
+    def __start_tor_server(self):
+        self.s_tor_datadir = ".onionperf/server/tor/data"
+        if not os.path.exists(self.s_tor_datadir): os.makedirs(self.s_tor_datadir)
+        os.chmod(self.s_tor_datadir, 0700)
+
+        self.s_tor_hsdir = ".onionperf/server/tor/hs"
+        if not os.path.exists(self.s_tor_hsdir): os.makedirs(self.s_tor_hsdir)
+        os.chmod(self.s_tor_hsdir, 0700)
+
+        config = {
+            'ORPort': '0',
+            'DirPort': '0',
+            'ControlPort': '9050',
+            'SocksPort': '9000',
+            'SocksListenAddress': '127.0.0.1',
+            'ClientOnly': '1',
+            'FascistFirewall': '1',
+            'WarnUnsafeSocks': '0',
+            'SafeLogging': '0',
+            'MaxCircuitDirtiness': '10 seconds',
+            'DataDirectory': self.s_tor_datadir,
+            'HiddenServiceDir': self.s_tor_hsdir,
+            'HiddenServicePort': '80 127.0.0.1:8888',
+            'Log': [
+                'NOTICE stdout',
+                'INFO file .onionperf/server/tor/tor.log',
+            ],
+        }
+
+        tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
+
+        with open("{0}/hostname".format(self.s_tor_hsdir), 'r') as f:
+            self.s_tor_onionurl = f.readline().strip()
+
+def main():
+    # construct the options
+    parser = argparse.ArgumentParser(
+        description=DESCRIPTION, 
+        formatter_class=argparse.RawTextHelpFormatter)
+
+    parser.add_argument('-p', '--prefix', 
+        help="""a STRING directory path prefix where onionperf will run""", 
+        metavar="STRING",
+        action="store", dest="prefix",
+        default=os.getcwd())
+
+    parser.add_argument('--tor', 
+        help="""a STRING path to a tor binary""", 
+        metavar="STRING",
+        action="store", dest="torpath",
+        default=None)
+
+    parser.add_argument('--tgen', 
+        help="""a STRING path to a tgen binary""", 
+        metavar="STRING",
+        action="store", dest="tgenpath",
+        default=None)
+
+    # get args
+    args = parser.parse_args()
+
+    # test paths
+    args.torpath = find_path_helper(args.torpath, "tor")
+    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
+
+    # validate paths and run
+    if args.torpath is not None and args.tgenpath is not None:
+        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
+        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
+        op = OnionPerf(args.torpath, args.tgenpath)
+        op.run()
+    else: logging.info("Please fix path errors to continue")
+
+def find_path_helper(binpath, defaultname):
+    # find the path to tor
+    if binpath is not None:
+        binpath = os.path.abspath(os.path.expanduser(binpath))
+    else:
+        w = which_helper(defaultname)
+        if w is not None:
+            binpath = os.path.abspath(os.path.expanduser(w))
+        else:
+            logging.error("You did not specify a path to a '{0}' binary, and one does not exist in your PATH".format(defaultname))
+            return None
+    # now make sure the path exists
+    if os.path.exists(binpath):
+        logging.info("Using '{0}' binary at {1}".format(defaultname, binpath))
+    else:
+        logging.error("Path to '{0}' binary does not exist: {1}".format(defaultname, binpath))
+        return None
+    # we found it and it exists
+    return binpath
+
+def which_helper(program):
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+    return None
+
+if __name__ == '__main__': sys.exit(main())
