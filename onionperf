@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
 import sys, os, shutil, subprocess, multiprocessing, argparse, logging, stem, functools, time
-from signal import signal, SIGINT, SIG_IGN
+from signal import signal, SIGINT, SIG_IGN, SIGTERM
+from itertools import cycle
 from stem import process, control
 from stem.control import EventType, Controller
 from stem.util import str_tools
@@ -9,6 +10,8 @@ from stem.util import str_tools
 DESCRIPTION="""
 A utility to track the performance of hidden services in Tor.
 """
+
+DOWNLOAD_SIZES=["10 KiB", "50 KiB"]
 
 TGEN_SERVER_CONF="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
   <key attr.name="time" attr.type="string" for="node" id="d1" />
@@ -61,7 +64,9 @@ class OnionPerf:
     s_tor_hsdir = None
     s_tor_onionurl = None
     s_tgen_process = None
+    s_tor_logger_process = None
     c_tgen_process = None
+    c_tor_logger_process = None
 
     def __init__(self, torpath, tgenpath):
         self.torpath = torpath
@@ -73,12 +78,14 @@ class OnionPerf:
         try:
             logging.info("Starting tgen server...")
             self.__start_tgen_server()
-            logging.info("Starting tor hs server...")
+            logging.info("Starting tor server...")
             self.__start_tor_server()
             logging.info("Starting tor client...")
             self.__start_tor_client()
             logging.info("Starting tgen client...")
             self.__start_tgen_client()
+            logging.info("Starting torctl loggers...")
+            self.__start_tor_loggers()
 
             logging.info("Everything is running; sleeping now...")
             time.sleep(3600*24*30)
@@ -89,18 +96,20 @@ class OnionPerf:
         finally:
             logging.info("Cleaning up child processes now...")
 
+            logging.disable(logging.INFO)
             self.done_event.set()
             if self.c_tgen_process is not None: self.c_tgen_process.join()
             if self.s_tgen_process is not None: self.s_tgen_process.join()
+            if self.c_tor_logger_process is not None: self.c_tor_logger_process.join()
+            if self.s_tor_logger_process is not None: self.s_tor_logger_process.join()
+            logging.disable(logging.NOTSET)
 
             logging.info("Child processes terminated")
-            #logging.disable(logging.INFO)
 
             if self.s_tor_hsdir is not None:
                 #self.server_tor_ctl.remove_hidden_service(self.server_hsdir)
                 shutil.rmtree(self.s_tor_hsdir)
 
-            #logging.disable(logging.NOTSET)
             logging.info("Child process cleanup complete!")
             logging.info("Exiting")
 
@@ -114,15 +123,20 @@ class OnionPerf:
         if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
         conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
         if not os.path.exists(conffile):
-            with open(conffile, 'wb') as f:
-                print >>f, TGEN_SERVER_CONF,
+            with open(conffile, 'wb') as f: print >>f, TGEN_SERVER_CONF,
         with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
             p = None
             while not self.done_event.is_set():
-                if p is None or p.poll() is None: p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
-                self.done_event.wait(1)
-            if p is not None and p.poll() is not None: p.terminate()
-            p.wait()
+                p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
+                while not self.done_event.wait(5): # while the timeout triggers
+                    if p.poll() is not None: # process has terminated
+                        p.wait() # collect child
+                        p = None # clear
+                        break # break out inner loop and restart process
+            # if interupted and proc is still running, kill it
+            if p is not None and p.poll() is None:
+                p.terminate()
+                p.wait()
 
     def __start_tgen_client(self):
         self.c_tgen_process = multiprocessing.Process(target=OnionPerf.__tgen_client_main, args=(self,))
@@ -134,24 +148,41 @@ class OnionPerf:
         if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
         conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
         with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
+            sizes = cycle(DOWNLOAD_SIZES)
             p = None
             while not self.done_event.is_set():
-                if p is None or p.poll() is None:
-                    if os.path.exists(conffile): os.remove(conffile)
-                    with open(conffile, 'wb') as f:
-                        print >>f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, "10 KiB"),
-                    p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
-                self.done_event.wait(1)
-            if p is not None and p.poll() is not None: p.terminate()
-            p.wait()
+                if os.path.exists(conffile): os.remove(conffile)
+                with open(conffile, 'wb') as f: print >>f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, sizes.next()),
+                p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
+                while not self.done_event.wait(5): # while the timeout triggers
+                    if p.poll() is not None: # process has terminated
+                        p.wait() # collect child
+                        p = None # clear
+                        break # break out inner loop and restart process
+            # if interupted and proc is still running, kill it
+            if p is not None and p.poll() is None:
+                p.terminate()
+                p.wait()
 
-    def __start_torctl_logger(self): pass
+    def __start_tor_loggers(self):
+        self.s_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9050, ".onionperf/server/tor/ctl.log"))
+        self.s_tor_logger_process.start()
+        self.c_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9051, ".onionperf/client/tor/ctl.log"))
+        self.c_tor_logger_process.start()
 
-    def __run_torctl_logger(ctlport):
+    def __tor_logger_main(self, ctlport, logpath):
         signal(SIGINT, SIG_IGN) # ignore interrupts
-        with stem.control.Controller.from_port(port = ctlport) as torctl:
-            torctl.authenticate()
-            torctl.add_event_listener(tor_event_logger, stem.control.EventType.BW)
+        with open(logpath, 'a') as logf:
+            with stem.control.Controller.from_port(port = ctlport) as torctl:
+                event_handler = functools.partial(OnionPerf.__handle_tor_event, self, logf, )
+                torctl.authenticate()
+                torctl.add_event_listener(event_handler, stem.control.EventType.BW)#, stem.control.EventType.CIRC_BW)
+                self.done_event.wait()
+
+    def __handle_tor_event(self, logf, event):
+        s = time.time()
+        t = time.localtime(s)
+        print >>logf, "{0} {1} {2}".format(time.strftime("%x %H:%M:%S"), s, event.raw_content()),
 
     def __start_tor_client(self):
         self.c_tor_datadir = ".onionperf/client/tor/data"
@@ -247,6 +278,7 @@ def main():
     if args.torpath is not None and args.tgenpath is not None:
         args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
         if not os.path.exists(args.prefix): os.makedirs(args.prefix)
+        os.chdir(args.prefix)
         op = OnionPerf(args.torpath, args.tgenpath)
         op.run()
     else: logging.info("Please fix path errors to continue")
