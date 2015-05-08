@@ -54,7 +54,7 @@ TGEN_CLIENT_CONF_TEMPLATE="""<graphml xmlns="http://graphml.graphdrawing.org/xml
 </graphml>"""
 
 logging.basicConfig(format='[%(asctime)s] [onionperf] [%(levelname)s] %(message)s', level=logging.INFO)
-logging.getLogger("stem").setLevel(logging.INFO)
+logging.getLogger("stem").setLevel(logging.WARN)
 
 class OnionPerf:
     torpath = None
@@ -82,10 +82,10 @@ class OnionPerf:
             self.__start_tor_server()
             logging.info("Starting tor client...")
             self.__start_tor_client()
+            logging.info("Starting tor loggers...")
+            self.__start_tor_loggers()
             logging.info("Starting tgen client...")
             self.__start_tgen_client()
-            logging.info("Starting torctl loggers...")
-            self.__start_tor_loggers()
 
             logging.info("Everything is running; sleeping now...")
             time.sleep(3600*24*30)
@@ -102,6 +102,7 @@ class OnionPerf:
             if self.s_tgen_process is not None: self.s_tgen_process.join()
             if self.c_tor_logger_process is not None: self.c_tor_logger_process.join()
             if self.s_tor_logger_process is not None: self.s_tor_logger_process.join()
+            time.sleep(1)
             logging.disable(logging.NOTSET)
 
             logging.info("Child processes terminated")
@@ -165,9 +166,9 @@ class OnionPerf:
                 p.wait()
 
     def __start_tor_loggers(self):
-        self.s_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9050, ".onionperf/server/tor/ctl.log"))
+        self.s_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9050, ".onionperf/server/tor/tor.ctl.log"))
         self.s_tor_logger_process.start()
-        self.c_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9051, ".onionperf/client/tor/ctl.log"))
+        self.c_tor_logger_process = multiprocessing.Process(target=OnionPerf.__tor_logger_main, args=(self, 9051, ".onionperf/client/tor/tor.ctl.log"))
         self.c_tor_logger_process.start()
 
     def __tor_logger_main(self, ctlport, logpath):
@@ -176,8 +177,10 @@ class OnionPerf:
             with stem.control.Controller.from_port(port = ctlport) as torctl:
                 event_handler = functools.partial(OnionPerf.__handle_tor_event, self, logf, )
                 torctl.authenticate()
-                torctl.add_event_listener(event_handler, stem.control.EventType.BW)#, stem.control.EventType.CIRC_BW)
+                torctl.add_event_listener(event_handler, stem.control.EventType.ORCONN, stem.control.EventType.CIRC, stem.control.EventType.STREAM, stem.control.EventType.BW, stem.control.EventType.GUARD, stem.control.EventType.INFO, stem.control.EventType.NOTICE, stem.control.EventType.WARN, stem.control.EventType.ERR, stem.control.EventType.HS_DESC, stem.control.EventType.BUILDTIMEOUT_SET, stem.control.EventType.DESCCHANGED, stem.control.EventType.NEWCONSENSUS, stem.control.EventType.NEWDESC, stem.control.EventType.STATUS_CLIENT, stem.control.EventType.STATUS_GENERAL, stem.control.EventType.STATUS_SERVER)
+                #torctl.add_event_listener(event_handler, stem.control.EventType.CONN_BW, stem.control.EventType.CIRC_BW, stem.control.EventType.STREAM_BW, stem.control.EventType.TB_EMPTY, stem.control.EventType.HS_DESC_CONTENT)
                 self.done_event.wait()
+        time.sleep(1)
 
     def __handle_tor_event(self, logf, event):
         s = time.time()
@@ -203,7 +206,7 @@ class OnionPerf:
             'DataDirectory': self.c_tor_datadir,
             'Log': [
                 'NOTICE stdout',
-                'INFO file .onionperf/client/tor/tor.log'.format(self.c_tor_datadir),
+                #'INFO file .onionperf/client/tor/tor.log'.format(self.c_tor_datadir),
             ],
         }
 
@@ -234,7 +237,7 @@ class OnionPerf:
             'HiddenServicePort': '80 127.0.0.1:8888',
             'Log': [
                 'NOTICE stdout',
-                'INFO file .onionperf/server/tor/tor.log',
+                #'INFO file .onionperf/server/tor/tor.log',
             ],
         }
 
