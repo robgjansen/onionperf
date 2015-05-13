@@ -11,7 +11,7 @@ DESCRIPTION="""
 A utility to track the performance of hidden services in Tor.
 """
 
-DOWNLOAD_SIZES=["10 KiB", "50 KiB"]
+DOWNLOAD_SIZES=["100 KiB", "1000 KiB"]
 
 TGEN_SERVER_CONF="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
   <key attr.name="time" attr.type="string" for="node" id="d1" />
@@ -84,6 +84,8 @@ class OnionPerf:
             self.__start_tor_client()
             logging.info("Starting tor loggers...")
             self.__start_tor_loggers()
+            logging.info("Pausing for 30 seconds to publish hidden service descriptor...")
+            time.sleep(30)
             logging.info("Starting tgen client...")
             self.__start_tgen_client()
 
