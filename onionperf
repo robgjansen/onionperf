@@ -11,7 +11,7 @@ DESCRIPTION="""
 A utility to track the performance of hidden services in Tor.
 """
 
-DOWNLOAD_SIZES=["100 KiB", "1000 KiB"]
+DOWNLOAD_SIZES=["50 KiB", "1 MiB", "5 MiB"]
 
 TGEN_SERVER_CONF="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
   <key attr.name="time" attr.type="string" for="node" id="d1" />
@@ -59,6 +59,8 @@ logging.getLogger("stem").setLevel(logging.WARN)
 class OnionPerf:
     torpath = None
     tgenpath = None
+    burst_interval = None
+    burst_num = None
     done_event = None
     s_tor_datadir = None
     s_tor_hsdir = None
@@ -68,9 +70,11 @@ class OnionPerf:
     c_tgen_process = None
     c_tor_logger_process = None
 
-    def __init__(self, torpath, tgenpath):
-        self.torpath = torpath
-        self.tgenpath = tgenpath
+    def __init__(self, args):
+        self.torpath = args.torpath
+        self.tgenpath = args.tgenpath
+        self.burst_interval = args.burst_interval
+        self.burst_num = args.burst_num
         self.done_event = multiprocessing.Event()
 
     def run(self):
@@ -153,6 +157,7 @@ class OnionPerf:
         with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
             sizes = cycle(DOWNLOAD_SIZES)
             p = None
+            count = 0
             while not self.done_event.is_set():
                 if os.path.exists(conffile): os.remove(conffile)
                 with open(conffile, 'wb') as f: print >>f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, sizes.next()),
@@ -162,6 +167,10 @@ class OnionPerf:
                         p.wait() # collect child
                         p = None # clear
                         break # break out inner loop and restart process
+                count += 1
+                if count >= self.burst_num:
+                    time.sleep(self.burst_interval)
+                    count = 0
             # if interupted and proc is still running, kill it
             if p is not None and p.poll() is None:
                 p.terminate()
@@ -256,21 +265,28 @@ def main():
 
     parser.add_argument('-p', '--prefix', 
         help="""a STRING directory path prefix where onionperf will run""", 
-        metavar="STRING",
-        action="store", dest="prefix",
-        default=os.getcwd())
+        action="store", type=str, metavar="STRING",
+        dest="prefix", default=os.getcwd())
 
     parser.add_argument('--tor', 
         help="""a STRING path to a tor binary""", 
-        metavar="STRING",
-        action="store", dest="torpath",
-        default=None)
+        action="store", type=str, metavar="STRING",
+        dest="torpath", default=None)
 
     parser.add_argument('--tgen', 
         help="""a STRING path to a tgen binary""", 
-        metavar="STRING",
-        action="store", dest="tgenpath",
-        default=None)
+        action="store", type=str, metavar="STRING",
+        dest="tgenpath", default=None)
+
+    parser.add_argument('-t', 
+        help="""the number N of seconds to sleep between download phases""", 
+        action="store", type=int, metavar="N",
+        dest="burst_interval", default=10)
+
+    parser.add_argument('-n', 
+        help="""the number N of downloads to perform during each download phase""", 
+        action="store", type=int, metavar="N",
+        dest="burst_num", default=15)
 
     # get args
     args = parser.parse_args()
@@ -284,7 +300,7 @@ def main():
         args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
         if not os.path.exists(args.prefix): os.makedirs(args.prefix)
         os.chdir(args.prefix)
-        op = OnionPerf(args.torpath, args.tgenpath)
+        op = OnionPerf(args)
         op.run()
     else: logging.info("Please fix path errors to continue")
 
