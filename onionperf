@@ -53,7 +53,7 @@ TGEN_CLIENT_CONF_TEMPLATE="""<graphml xmlns="http://graphml.graphdrawing.org/xml
   </graph>
 </graphml>"""
 
-logging.basicConfig(format='[%(asctime)s] [onionperf] [%(levelname)s] %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(created)f [onionperf] [%(levelname)s] %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 logging.getLogger("stem").setLevel(logging.WARN)
 
 class OnionPerf:
@@ -281,7 +281,7 @@ def main():
     parser.add_argument('-t', 
         help="""the number N of seconds to sleep between download phases""", 
         action="store", type=int, metavar="N",
-        dest="burst_interval", default=10)
+        dest="burst_interval", default=3600)
 
     parser.add_argument('-n', 
         help="""the number N of downloads to perform during each download phase""", 
