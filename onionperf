@@ -214,6 +214,7 @@ class OnionPerf:
             'WarnUnsafeSocks': '0',
             'SafeLogging': '0',
             'MaxCircuitDirtiness': '10 seconds',
+            'UseEntryGuards' : '0',
             'DataDirectory': self.c_tor_datadir,
             'Log': [
                 'NOTICE stdout',
@@ -243,6 +244,7 @@ class OnionPerf:
             'WarnUnsafeSocks': '0',
             'SafeLogging': '0',
             'MaxCircuitDirtiness': '10 seconds',
+            'UseEntryGuards' : '0',
             'DataDirectory': self.s_tor_datadir,
             'HiddenServiceDir': self.s_tor_hsdir,
             'HiddenServicePort': '80 127.0.0.1:8888',
