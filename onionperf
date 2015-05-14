@@ -196,7 +196,7 @@ class OnionPerf:
     def __handle_tor_event(self, logf, event):
         s = time.time()
         t = time.localtime(s)
-        print >>logf, "{0} {1} {2}".format(time.strftime("%x %H:%M:%S"), s, event.raw_content()),
+        print >>logf, "{0} {1} {2}".format(time.strftime("%Y-%m-%d %H:%M:%S"), s, event.raw_content()),
 
     def __start_tor_client(self):
         self.c_tor_datadir = ".onionperf/client/tor/data"
