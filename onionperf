@@ -8,7 +8,11 @@ from stem.control import EventType, Controller
 from stem.util import str_tools
 
 DESCRIPTION="""
-A utility to track the performance of hidden services in Tor.
+OnionPerf is a utility to track the performance of hidden services in Tor.
+\n\n
+OnionPerf uses multiple processes and threads to download random data through Tor while tracking the performance of those downloads. The data is served and fetched on localhost using two TGen (traffic generator) processes, but is tranferred through Tor using a temporary Tor Hidden Service process and a client process. Tor control information and TGen performance statistics are logged to disk and can be later analyzed (using onionperf-analyze.py) to vizualize changes in Tor performance over time.
+\n\n
+For more information, see https://github.com/robgjansen/onionperf.
 """
 
 DOWNLOAD_SIZES=["50 KiB", "1 MiB", "5 MiB"]
@@ -56,6 +60,53 @@ TGEN_CLIENT_CONF_TEMPLATE="""<graphml xmlns="http://graphml.graphdrawing.org/xml
 logging.basicConfig(format='%(asctime)s %(created)f [onionperf] [%(levelname)s] %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 logging.getLogger("stem").setLevel(logging.WARN)
 
+def main():
+    # construct the options
+    parser = argparse.ArgumentParser(
+        description=DESCRIPTION, 
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter) # RawTextHelpFormatter
+
+    parser.add_argument('--tor', 
+        help="""a STRING path to a tor binary""", 
+        action="store", type=str, metavar="STRING",
+        dest="torpath", default=which_helper("tor"))
+
+    parser.add_argument('--tgen', 
+        help="""a STRING path to a tgen binary""", 
+        action="store", type=str, metavar="STRING",
+        dest="tgenpath", default=which_helper("tgen"))
+
+    parser.add_argument('-n', 
+        help="""the number N of downloads to perform during each download phase""", 
+        action="store", type=int, metavar="N",
+        dest="burst_num", default=15)
+
+    parser.add_argument('-t', 
+        help="""the number N of seconds to sleep between download phases""", 
+        action="store", type=int, metavar="N",
+        dest="burst_interval", default=3600)
+
+    parser.add_argument('-p', '--prefix', 
+        help="""a STRING directory path prefix where onionperf will run""", 
+        action="store", type=str, metavar="STRING",
+        dest="prefix", default=os.getcwd())
+
+    # get args
+    args = parser.parse_args()
+
+    # test paths
+    args.torpath = find_path_helper(args.torpath, "tor")
+    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
+
+    # validate paths and run
+    if args.torpath is not None and args.tgenpath is not None:
+        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
+        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
+        os.chdir(args.prefix)
+        op = OnionPerf(args)
+        op.run()
+    else: logging.info("Please fix path errors to continue")
+
 class OnionPerf:
     torpath = None
     tgenpath = None
@@ -66,8 +117,10 @@ class OnionPerf:
     s_tor_hsdir = None
     s_tor_onionurl = None
     s_tgen_process = None
+    s_tor_p = None
     s_tor_logger_process = None
     c_tgen_process = None
+    c_tor_p = None
     c_tor_logger_process = None
 
     def __init__(self, args):
@@ -93,11 +146,17 @@ class OnionPerf:
             logging.info("Starting tgen client...")
             self.__start_tgen_client()
 
-            logging.info("Everything is running; sleeping now...")
-            time.sleep(3600*24*30)
+            logging.info("Log files for the client and server porcesses are located in {0}".format(os.getcwd()))
+
+            while True:
+                logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count()))
+                if self.__is_alive(): logging.info("Everything is running :)")
+                else: logging.warning("Some parallel components have died :(")
+                logging.info("Sleeping for 1 hour; press CTRL-C for graceful shutdown...")
+                time.sleep(3600)
 
         except KeyboardInterrupt:
-            logging.info("Interrupt received")
+            logging.info("Interrupt received, please wait for graceful shutdown")
 
         finally:
             logging.info("Cleaning up child processes now...")
@@ -119,6 +178,35 @@ class OnionPerf:
 
             logging.info("Child process cleanup complete!")
             logging.info("Exiting")
+
+    def __get_download_count(self):
+        count = 0
+        with open(".onionperf/client/tgen/tgen.log", 'r') as fin:
+            for line in fin:
+                if line.find("transfer-complete") > -1: count += 1
+        return count
+
+    def __is_alive(self):
+        alive = True
+        if self.c_tgen_process is not None and not self.c_tgen_process.is_alive():
+            logging.info("client tgen process is dead")
+            alive = False
+        if self.s_tgen_process is not None and not self.s_tgen_process.is_alive():
+            logging.info("server tgen process is dead")
+            alive = False
+        if self.c_tor_p is not None and self.c_tor_p.poll() is not None:
+            logging.info("client tor process is dead")
+            alive = False
+        if self.s_tor_p is not None and self.s_tor_p.poll() is not None:
+            logging.info("server tor process is dead")
+            alive = False
+        if self.c_tor_logger_process is not None and not self.c_tor_logger_process.is_alive():
+            logging.info("client tor logging process is dead")
+            alive = False
+        if self.s_tor_logger_process is not None and not self.s_tor_logger_process.is_alive():
+            logging.info("server tor logging process is dead")
+            alive = False
+        return alive
 
     def __start_tgen_server(self):
         self.s_tgen_process = multiprocessing.Process(target=OnionPerf.__tgen_server_main, args=(self,))
@@ -222,7 +310,7 @@ class OnionPerf:
             ],
         }
 
-        tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
+        self.c_tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
 
     def __start_tor_server(self):
         self.s_tor_datadir = ".onionperf/server/tor/data"
@@ -254,57 +342,10 @@ class OnionPerf:
             ],
         }
 
-        tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
+        self.s_tor_p = stem.process.launch_tor_with_config(config, tor_cmd=self.torpath, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=True)
 
         with open("{0}/hostname".format(self.s_tor_hsdir), 'r') as f:
             self.s_tor_onionurl = f.readline().strip()
-
-def main():
-    # construct the options
-    parser = argparse.ArgumentParser(
-        description=DESCRIPTION, 
-        formatter_class=argparse.RawTextHelpFormatter)
-
-    parser.add_argument('-p', '--prefix', 
-        help="""a STRING directory path prefix where onionperf will run""", 
-        action="store", type=str, metavar="STRING",
-        dest="prefix", default=os.getcwd())
-
-    parser.add_argument('--tor', 
-        help="""a STRING path to a tor binary""", 
-        action="store", type=str, metavar="STRING",
-        dest="torpath", default=None)
-
-    parser.add_argument('--tgen', 
-        help="""a STRING path to a tgen binary""", 
-        action="store", type=str, metavar="STRING",
-        dest="tgenpath", default=None)
-
-    parser.add_argument('-t', 
-        help="""the number N of seconds to sleep between download phases""", 
-        action="store", type=int, metavar="N",
-        dest="burst_interval", default=3600)
-
-    parser.add_argument('-n', 
-        help="""the number N of downloads to perform during each download phase""", 
-        action="store", type=int, metavar="N",
-        dest="burst_num", default=15)
-
-    # get args
-    args = parser.parse_args()
-
-    # test paths
-    args.torpath = find_path_helper(args.torpath, "tor")
-    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
-
-    # validate paths and run
-    if args.torpath is not None and args.tgenpath is not None:
-        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
-        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
-        os.chdir(args.prefix)
-        op = OnionPerf(args)
-        op.run()
-    else: logging.info("Please fix path errors to continue")
 
 def find_path_helper(binpath, defaultname):
     # find the path to tor
