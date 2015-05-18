@@ -79,10 +79,8 @@ visualize changes in performance over time.
 python onionperf-analyze.py .onionperf/client/tgen/tgen.log
 ```
 
+This will save a new PDF in the current directory.
+
 ### Contribute
 
 GitHub pull requests are welcome and encouraged!
-
-
-This will save a new PDF in the current directory.
-
