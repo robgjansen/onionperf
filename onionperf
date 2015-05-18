@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
-import sys, os, shutil, subprocess, multiprocessing, argparse, logging, stem, functools, time
+import sys, os, shutil, subprocess, multiprocessing, argparse, logging, time
 from signal import signal, SIGINT, SIG_IGN, SIGTERM
 from itertools import cycle
+from functools import partial
+
+import stem
 from stem import process, control
 from stem.control import EventType, Controller
 from stem.util import str_tools
@@ -259,6 +262,7 @@ class OnionPerf:
                 if count >= self.burst_num:
                     time.sleep(self.burst_interval)
                     count = 0
+                else: time.sleep(10) # give time for the circuit to expire
             # if interupted and proc is still running, kill it
             if p is not None and p.poll() is None:
                 p.terminate()
@@ -274,7 +278,7 @@ class OnionPerf:
         signal(SIGINT, SIG_IGN) # ignore interrupts
         with open(logpath, 'a') as logf:
             with stem.control.Controller.from_port(port = ctlport) as torctl:
-                event_handler = functools.partial(OnionPerf.__handle_tor_event, self, logf, )
+                event_handler = partial(OnionPerf.__handle_tor_event, self, logf, )
                 torctl.authenticate()
                 torctl.add_event_listener(event_handler, stem.control.EventType.ORCONN, stem.control.EventType.CIRC, stem.control.EventType.STREAM, stem.control.EventType.BW, stem.control.EventType.GUARD, stem.control.EventType.INFO, stem.control.EventType.NOTICE, stem.control.EventType.WARN, stem.control.EventType.ERR, stem.control.EventType.HS_DESC, stem.control.EventType.BUILDTIMEOUT_SET, stem.control.EventType.DESCCHANGED, stem.control.EventType.NEWCONSENSUS, stem.control.EventType.NEWDESC, stem.control.EventType.STATUS_CLIENT, stem.control.EventType.STATUS_GENERAL, stem.control.EventType.STATUS_SERVER)
                 #torctl.add_event_listener(event_handler, stem.control.EventType.CONN_BW, stem.control.EventType.CIRC_BW, stem.control.EventType.STREAM_BW, stem.control.EventType.TB_EMPTY, stem.control.EventType.HS_DESC_CONTENT)
