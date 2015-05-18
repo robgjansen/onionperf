@@ -41,7 +41,7 @@ pylab.rcParams.update({
     'legend.markerscale' : 1.0,
     'ps.useafm' : True,
     'pdf.use14corefonts' : True,
-    'text.usetex' : True,
+#    'text.usetex' : True,
 })
 
 def main():
