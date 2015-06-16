@@ -127,7 +127,7 @@ def plot(args, page):
         if int(i) not in hours: hours[int(i)] = True
 
     y_ma = movingaverage(y, int(num_hours/10.0))
-    pylab.scatter(x, y, c='k', s=3.0, label='raw')
+    pylab.scatter(x, y, c='k', linewidths=0, s=3.0, alpha=0.5, label='raw')
     pylab.plot(x, y_ma, 'r-', label='smoothed')
 
     pylab.xlabel("Time Span (h)")
@@ -182,7 +182,7 @@ def plot(args, page):
         y = [d[bytes][k] for k in keys]
 
         y_ma = movingaverage(y, int(num_hours/10.0))
-        pylab.scatter(x, y, c=colors[bytes], edgecolor=colors[bytes], s=3.0)
+        pylab.scatter(x, y, c=colors[bytes], edgecolor=colors[bytes], linewidths=0, s=3.0, alpha=0.5)
         pylab.plot(x, y_ma, '-', c=colors[bytes], label="{0} KiB".format(int(bytes/1024.0)))
 
     pylab.xlabel("Time Span (h)")
