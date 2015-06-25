@@ -184,9 +184,11 @@ class OnionPerf:
 
     def __get_download_count(self):
         count = 0
-        with open(".onionperf/client/tgen/tgen.log", 'r') as fin:
-            for line in fin:
-                if line.find("transfer-complete") > -1: count += 1
+        tgen_log_path = ".onionperf/client/tgen/tgen.log"
+        if os.path.exists(tgen_log_path):
+            with open(tgen_log_path, 'r') as fin:
+                for line in fin:
+                    if line.find("transfer-complete") > -1: count += 1
         return count
 
     def __is_alive(self):
