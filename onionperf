@@ -136,26 +136,27 @@ class OnionPerf:
     def run(self):
         # if ctrl-c is pressed, shutdown child processes properly
         try:
-            logging.info("Starting tgen server...")
+            logging.info("Starting tgen server process...")
             self.__start_tgen_server()
-            logging.info("Starting tor server...")
+            logging.info("Starting tor server process...")
             self.__start_tor_server()
-            logging.info("Starting tor client...")
+            logging.info("Starting tor client process...")
             self.__start_tor_client()
-            logging.info("Starting tor loggers...")
+            logging.info("Starting tor logging processes...")
             self.__start_tor_loggers()
             logging.info("Pausing for 30 seconds to publish hidden service descriptor...")
             time.sleep(30)
-            logging.info("Starting tgen client...")
+            logging.info("Starting tgen client process using configured burst_num={0} and burst_interval={1}...".format(self.burst_num, self.burst_interval))
             self.__start_tgen_client()
 
             logging.info("Log files for the client and server porcesses are located in {0}".format(os.getcwd()))
 
             while True:
                 logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count()))
-                if self.__is_alive(): logging.info("Everything is running :)")
+                if self.__is_alive(): logging.info("All helper process seem to be alive :)")
                 else: logging.warning("Some parallel components have died :(")
-                logging.info("Sleeping for 1 hour; press CTRL-C for graceful shutdown...")
+                logging.info("Main process will now sleep for 1 hour (helper processes run on their own schedule)")
+                logging.info("press CTRL-C for graceful shutdown...")
                 time.sleep(3600)
 
         except KeyboardInterrupt:

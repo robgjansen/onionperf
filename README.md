@@ -81,6 +81,23 @@ python onionperf-analyze.py .onionperf/client/tgen/tgen.log
 
 This will save a new PDF in the current directory.
 
+
+### Implementation Notes
+
+OnionPerf has two timers to be aware of:
+
+The **heartbeat timer** runs in the main process. Once configuration is complete, the main process loops through the following:
+  1. parse the tgen log file and count the number of completed downloads,
+  1. check that all helper processes are alive,
+  1. sleep for 3600 seconds,
+  1. repeat.
+
+The **download timer** runs in the tgen client download manager child process. The download manager:
+  1. downloads files by cycling through the file sizes (default sizes are 50 KiB, 1 MiB, and 5 MiB) until it attempts `burst_num` total downloads,
+  1. pauses for `burst_interval` seconds.
+
+Both `burst_num` and `burst_interval` are adjustable flags to OnionPerf and are listed in the help menu (`onionperf --help`).
+
 ### Contribute
 
 GitHub pull requests are welcome and encouraged!
