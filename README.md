@@ -5,10 +5,10 @@ OnionPerf is a utility to track the performance of hidden services in Tor.
 OnionPerf uses multiple processes and threads to download random data
 through Tor while tracking the performance of those downloads. The data is
 served and fetched on localhost using two TGen (traffic generator)
-processes, but is tranferred through Tor using a temporary Tor Hidden
+processes, but is transferred through Tor using a temporary Tor Hidden
 Service process and a client process. Tor control information and TGen
 performance statistics are logged to disk and can be later analyzed (using
-onionperf-analyze.py) to vizualize changes in Tor performance over time.
+onionperf-analyze.py) to visualize changes in Tor performance over time.
 
 For more information, see https://github.com/robgjansen/onionperf.
 
@@ -46,7 +46,7 @@ but we will build tgen as an external tool and skip building both the full
 simulator and the tgen simulator plugin.
 
 ```
-git clone git@github.com:shadow/shadow.git
+git clone https://github.com/shadow/shadow.git
 cd shadow/src/plugin/shadow-plugin-tgen
 mkdir build
 cd build
@@ -60,7 +60,7 @@ You will need to give onionperf the path to your custom 'tor' and 'tgen'
 binary files if they do not exist in your PATH environment variable.
 
 ```
-git clone git@github.com:robgjansen/onionperf.git
+git clone https://github.com/robgjansen/onionperf.git
 cd onionperf
 ./onionperf -h
 ./onionperf --tor=/home/rob/tor/src/or/tor --tgen=/home/rob/shadow/src/plugin/shadow-plugin-tgen/build/tgen
