@@ -88,6 +88,8 @@ class DataSink(object):
         if self.filename == '-':
             self.sink = sys.stdout
         elif self.compress or self.filename.endswith(".xz"):
+            if not self.filename.endswith(".xz"):
+                self.filename += ".xz"
             self.nullf = open("/dev/null", 'a')
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
             self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=self.nullf, stderr=self.nullf)

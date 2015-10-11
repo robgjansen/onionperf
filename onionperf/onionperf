@@ -132,16 +132,17 @@ def main():
     analyze_parser.set_defaults(func=analyze, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     analyze_parser.add_argument(
-        help="""The TYPE of Analysis to perform, which may be 'tgen' or 'tor'""",
-        metavar="TYPE", type=type_supported_analysis,
-        action="store", dest="atype")
-
-    analyze_parser.add_argument(
         help="""The PATH to search for tgen and tor log files, which may be '-'
 for STDIN; each log file may end in '.xz' to enable
 inline xz decompression""",
         metavar="PATH", type=type_str_path_in,
         action="store", dest="searchpath")
+
+    analyze_parser.add_argument('-t', '--type',
+        help="""The TYPE of Analysis to perform, which may be 'tgen', 'tor', or 'all'""",
+        metavar="TYPE", type=type_supported_analysis,
+        action="store", dest="atype",
+        default="all")
 
     analyze_parser.add_argument('-e', '--expression',
         help="""Append a regex PATTERN to the list of strings used with
@@ -151,7 +152,7 @@ re.search to find log file names in the search path""",
         default=[])
 
     analyze_parser.add_argument('-m', '--multiproc',
-        help="""Enable multiprocessing with N worker process, use '0'
+        help="""Enable multiprocessing with N worker process, which may be '0'
 to use the number of processor cores""",
         metavar="N", type=type_nonnegative_integer,
         action="store", dest="nprocesses",
@@ -225,17 +226,21 @@ def measure(args):
 '''
 
 def analyze(args):
-    print args.atype
-    if args.atype == 'tgen':
-        args.patterns.append("tgen.*\.log")
+    if args.atype == 'all' or args.atype == 'tgen':
+        patterns = ["tgen.*\.log"]
+        for p in args.patterns:
+            patterns.append(p)
         tgen_anal = onionperf.analysis.TGenAnalysis()
-        tgen_anal.analyze_file("tgen.log")
-        tgen_anal.dump_to_file("tgen.xz")
-    elif args.atype == 'tor':
-        args.patterns.append("torctl.*\.log")
+        tgen_anal.analyze_directory(args.searchpath, patterns, args.nprocesses)
+        tgen_anal.dump_to_file(tgen_anal.default_filename, output_prefix=args.prefix)
+
+    if args.atype == 'all' or args.atype == 'tor':
+        patterns = ["torctl.*\.log"]
+        for p in args.patterns:
+            patterns.append(p)
         tor_anal = onionperf.analysis.TorAnalysis()
-        tor_anal.analyze_file("tor.log")
-        tor_anal.dump_to_file("tor.xz")
+        tor_anal.analyze_directory(args.searchpath, patterns, args.nprocesses)
+        tor_anal.dump_to_file(tor_anal.default_filename, output_prefix=args.prefix)
 
 def visualize(args):
     # get analysis objects
@@ -268,7 +273,7 @@ def type_nonnegative_integer(value):
 
 def type_supported_analysis(value):
     t = value.lower()
-    if t != "tgen" and t != "tor":
+    if t != "all" and t != "tgen" and t != "tor":
         raise argparse.ArgumentTypeError("%s is an invalid Analysis type" % value)
     return t
 
@@ -276,7 +281,7 @@ def type_str_path_out(value):
     s = str(value)
     if s == "-":
         return s
-    p = os.path.abspath(os.path.expanduser(s))
+    p = os.path.abspath(os.path.expanduser(s + "/"))
     onionperf.util.make_path(p)
     return p
 

@@ -13,6 +13,11 @@ from signal import signal, SIGINT, SIG_IGN
 
 import util
 
+def analyze_subproc_func(parser):
+    signal(SIGINT, SIG_IGN)  # ignore interrupts
+    parser.parse()
+    return parser
+
 class Analysis(object):
     '''
     A utility to help analyze onionperf output. Currently, this parses tgen transfer complete messages, and plots the results to a PDF file that is saved in the current directory.
@@ -50,7 +55,7 @@ class Analysis(object):
         pool = Pool(num_subprocs)
         parsers = [self.new_parser(util.DataSource(filepath)) for filepath in logfilepaths]
         try:
-            mr = pool.map_async(Analysis.__analyze_subproc_func, parsers)
+            mr = pool.map_async(analyze_subproc_func, parsers)
             pool.close()
             while not mr.ready(): mr.wait(1)
             parsers = mr.get()
@@ -94,7 +99,7 @@ class Analysis(object):
         json.dump(self.result, output.get(), sort_keys=True, separators=(',', ': '), indent=2)
         output.close()
 
-        print >> sys.stderr, "all done dumping stats to {0}".format(filepath)
+        print >> sys.stderr, "all done dumping stats to {0}".format(output.filename)
 
     @classmethod
     def from_file(cls, input_prefix=os.getcwd(), filename=None):
@@ -232,14 +237,20 @@ class TorParser(Parser):
 
     def parse(self):
         self.source.open()
+
+        # XXX this is a hack to try to get the name
+        # a better approach would be get the Tor nickname, from ctl port?
+        if self.name is None: self.name = os.path.basename(os.path.dirname(self.source.filename))
+
         for line in self.source.get():
-            if self.name is None and re.search("Starting torctl program on host", line) is not None:
-                parts = line.strip().split()
-                if len(parts) < 11: continue
-                self.name = parts[10]
-            elif not self.boot_succeeded and re.search("Bootstrapped 100", line) is not None:
-                self.boot_succeeded = True
-            elif self.boot_succeeded and re.search("\s650\sBW\s", line) is not None:
+            if not self.boot_succeeded:
+                if re.search("Starting\storctl\sprogram\son\shost", line) is not None:
+                    parts = line.strip().split()
+                    if len(parts) < 11: continue
+                    self.name = parts[10]
+                if re.search("Bootstrapped\s100", line) is not None:
+                    self.boot_succeeded = True
+            elif re.search("\s650\sBW\s", line) is not None:
                 parts = line.strip().split()
                 if len(parts) < 11: continue
                 if 'Outbound' in line: print line
@@ -254,10 +265,6 @@ class TorParser(Parser):
                 self.data['bytes_written'][second] += bww
                 self.total_write += bww
         self.source.close()
-
-        # XXX this is a hack to try to get the name
-        # a better approach would be get the Tor nickname, from ctl port?
-        if self.name is None: self.name = os.path.dirname(self.source.filename)
 
     def merge(self, parsers):
         d = {'nodes':{}}
