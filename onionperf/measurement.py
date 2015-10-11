@@ -1,4 +1,8 @@
-#!/usr/bin/env python
+'''
+Created on Oct 1, 2015
+
+@author: rob
+'''
 
 import sys, os, shutil, subprocess, multiprocessing, argparse, logging, time
 from signal import signal, SIGINT, SIG_IGN, SIGTERM
@@ -10,107 +14,12 @@ from stem import process, control
 from stem.control import EventType, Controller
 from stem.util import str_tools
 
-DESCRIPTION="""
-OnionPerf is a utility to track the performance of hidden services in Tor.
-\n\n
-OnionPerf uses multiple processes and threads to download random data through Tor while tracking the performance of those downloads. The data is served and fetched on localhost using two TGen (traffic generator) processes, but is tranferred through Tor using a temporary Tor Hidden Service process and a client process. Tor control information and TGen performance statistics are logged to disk and can be later analyzed (using onionperf-analyze.py) to vizualize changes in Tor performance over time.
-\n\n
-For more information, see https://github.com/robgjansen/onionperf.
-"""
-
-DOWNLOAD_SIZES=["50 KiB", "1 MiB", "5 MiB"]
-
-TGEN_SERVER_CONF="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
-  <key attr.name="time" attr.type="string" for="node" id="d1" />
-  <key attr.name="serverport" attr.type="string" for="node" id="d0" />
-  <graph edgedefault="directed">
-    <node id="start">
-      <data key="d0">8888</data>
-      <data key="d1">0</data>
-    </node>
-  </graph>
-</graphml>"""
-
-TGEN_CLIENT_CONF_TEMPLATE="""<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
-  <key attr.name="socksproxy" attr.type="string" for="node" id="d7" />
-  <key attr.name="serverport" attr.type="string" for="node" id="d6" />
-  <key attr.name="peers" attr.type="string" for="node" id="d5" />
-  <key attr.name="type" attr.type="string" for="node" id="d4" />
-  <key attr.name="protocol" attr.type="string" for="node" id="d3" />
-  <key attr.name="size" attr.type="string" for="node" id="d2" />
-  <key attr.name="count" attr.type="string" for="node" id="d1" />
-  <key attr.name="time" attr.type="string" for="node" id="d0" />
-  <graph edgedefault="directed">
-    <node id="start">
-      <data key="d5">{0}:80</data>
-      <data key="d6">8889</data>
-      <data key="d7">localhost:9001</data>
-    </node>
-    <node id="transfer">
-      <data key="d3">tcp</data>
-      <data key="d4">get</data>
-      <data key="d2">{1}</data>
-    </node>
-    <node id="end">
-      <data key="d0">1</data>
-    </node>
-    <edge source="start" target="transfer" />
-    <edge source="transfer" target="end" />
-    <edge source="end" target="start" />
-  </graph>
-</graphml>"""
-
-logging.basicConfig(format='%(asctime)s %(created)f [onionperf] [%(levelname)s] %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
 logging.getLogger("stem").setLevel(logging.WARN)
 
-def main():
-    # construct the options
-    parser = argparse.ArgumentParser(
-        description=DESCRIPTION, 
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter) # RawTextHelpFormatter
-
-    parser.add_argument('--tor', 
-        help="""a STRING path to a tor binary""", 
-        action="store", type=str, metavar="STRING",
-        dest="torpath", default=which_helper("tor"))
-
-    parser.add_argument('--tgen', 
-        help="""a STRING path to a tgen binary""", 
-        action="store", type=str, metavar="STRING",
-        dest="tgenpath", default=which_helper("tgen"))
-
-    parser.add_argument('-n', 
-        help="""the number N of downloads to perform during each download phase""", 
-        action="store", type=int, metavar="N",
-        dest="burst_num", default=15)
-
-    parser.add_argument('-t', 
-        help="""the number N of seconds to sleep between download phases""", 
-        action="store", type=int, metavar="N",
-        dest="burst_interval", default=3600)
-
-    parser.add_argument('-p', '--prefix', 
-        help="""a STRING directory path prefix where onionperf will run""", 
-        action="store", type=str, metavar="STRING",
-        dest="prefix", default=os.getcwd())
-
-    # get args
-    args = parser.parse_args()
-
-    # test paths
-    args.torpath = find_path_helper(args.torpath, "tor")
-    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
-
-    # validate paths and run
-    if args.torpath is not None and args.tgenpath is not None:
-        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
-        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
-        os.chdir(args.prefix)
-        op = OnionPerf(args)
-        op.run()
-    else: logging.info("Please fix path errors to continue")
-
-class OnionPerf:
+class Measurement(object):
+    '''
+    classdocs
+    '''
     torpath = None
     tgenpath = None
     burst_interval = None
@@ -126,11 +35,14 @@ class OnionPerf:
     c_tor_p = None
     c_tor_logger_process = None
 
-    def __init__(self, args):
-        self.torpath = args.torpath
-        self.tgenpath = args.tgenpath
-        self.burst_interval = args.burst_interval
-        self.burst_num = args.burst_num
+    def __init__(self, params):
+        '''
+        Constructor
+        '''
+        self.torpath = params.torpath
+        self.tgenpath = params.tgenpath
+        self.burst_interval = params.burst_interval
+        self.burst_num = params.burst_num
         self.done_event = multiprocessing.Event()
 
     def run(self):
@@ -177,7 +89,7 @@ class OnionPerf:
             logging.info("Child processes terminated")
 
             if self.s_tor_hsdir is not None:
-                #self.server_tor_ctl.remove_hidden_service(self.server_hsdir)
+                # self.server_tor_ctl.remove_hidden_service(self.server_hsdir)
                 shutil.rmtree(self.s_tor_hsdir)
 
             logging.info("Child process cleanup complete!")
@@ -219,21 +131,21 @@ class OnionPerf:
         self.s_tgen_process.start()
 
     def __tgen_server_main(self):
-        signal(SIGINT, SIG_IGN) # ignore interrupts
+        signal(SIGINT, SIG_IGN)  # ignore interrupts
         tgen_dir = ".onionperf/server/tgen"
         if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
         conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
         if not os.path.exists(conffile):
-            with open(conffile, 'wb') as f: print >>f, TGEN_SERVER_CONF,
+            with open(conffile, 'wb') as f: print >> f, TGEN_SERVER_CONF,
         with open("{0}/tgen.log".format(tgen_dir), 'a') as logf:
             p = None
             while not self.done_event.is_set():
                 p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
-                while not self.done_event.wait(5): # while the timeout triggers
-                    if p.poll() is not None: # process has terminated
-                        p.wait() # collect child
-                        p = None # clear
-                        break # break out inner loop and restart process
+                while not self.done_event.wait(5):  # while the timeout triggers
+                    if p.poll() is not None:  # process has terminated
+                        p.wait()  # collect child
+                        p = None  # clear
+                        break  # break out inner loop and restart process
             # if interupted and proc is still running, kill it
             if p is not None and p.poll() is None:
                 p.terminate()
@@ -244,7 +156,7 @@ class OnionPerf:
         self.c_tgen_process.start()
 
     def __tgen_client_main(self):
-        signal(SIGINT, SIG_IGN) # ignore interrupts
+        signal(SIGINT, SIG_IGN)  # ignore interrupts
         tgen_dir = ".onionperf/client/tgen"
         if not os.path.exists(tgen_dir): os.makedirs(tgen_dir)
         conffile = "{0}/tgen.graphml.xml".format(tgen_dir)
@@ -254,18 +166,18 @@ class OnionPerf:
             count = 0
             while not self.done_event.is_set():
                 if os.path.exists(conffile): os.remove(conffile)
-                with open(conffile, 'wb') as f: print >>f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, sizes.next()),
+                with open(conffile, 'wb') as f: print >> f, TGEN_CLIENT_CONF_TEMPLATE.format(self.s_tor_onionurl, sizes.next()),
                 p = subprocess.Popen([self.tgenpath, conffile], stdout=logf, stderr=logf)
-                while not self.done_event.wait(5): # while the timeout triggers
-                    if p.poll() is not None: # process has terminated
-                        p.wait() # collect child
-                        p = None # clear
-                        break # break out inner loop and restart process
+                while not self.done_event.wait(5):  # while the timeout triggers
+                    if p.poll() is not None:  # process has terminated
+                        p.wait()  # collect child
+                        p = None  # clear
+                        break  # break out inner loop and restart process
                 count += 1
                 if count >= self.burst_num:
                     time.sleep(self.burst_interval)
                     count = 0
-                else: time.sleep(10) # give time for the circuit to expire
+                else: time.sleep(10)  # give time for the circuit to expire
             # if interupted and proc is still running, kill it
             if p is not None and p.poll() is None:
                 p.terminate()
@@ -278,20 +190,20 @@ class OnionPerf:
         self.c_tor_logger_process.start()
 
     def __tor_logger_main(self, ctlport, logpath):
-        signal(SIGINT, SIG_IGN) # ignore interrupts
+        signal(SIGINT, SIG_IGN)  # ignore interrupts
         with open(logpath, 'a') as logf:
-            with stem.control.Controller.from_port(port = ctlport) as torctl:
-                event_handler = partial(OnionPerf.__handle_tor_event, self, logf, )
+            with stem.control.Controller.from_port(port=ctlport) as torctl:
+                event_handler = partial(OnionPerf.__handle_tor_event, self, logf,)
                 torctl.authenticate()
                 torctl.add_event_listener(event_handler, stem.control.EventType.ORCONN, stem.control.EventType.CIRC, stem.control.EventType.STREAM, stem.control.EventType.BW, stem.control.EventType.GUARD, stem.control.EventType.INFO, stem.control.EventType.NOTICE, stem.control.EventType.WARN, stem.control.EventType.ERR, stem.control.EventType.HS_DESC, stem.control.EventType.BUILDTIMEOUT_SET, stem.control.EventType.DESCCHANGED, stem.control.EventType.NEWCONSENSUS, stem.control.EventType.NEWDESC, stem.control.EventType.STATUS_CLIENT, stem.control.EventType.STATUS_GENERAL, stem.control.EventType.STATUS_SERVER)
-                #torctl.add_event_listener(event_handler, stem.control.EventType.CONN_BW, stem.control.EventType.CIRC_BW, stem.control.EventType.STREAM_BW, stem.control.EventType.TB_EMPTY, stem.control.EventType.HS_DESC_CONTENT)
+                # torctl.add_event_listener(event_handler, stem.control.EventType.CONN_BW, stem.control.EventType.CIRC_BW, stem.control.EventType.STREAM_BW, stem.control.EventType.TB_EMPTY, stem.control.EventType.HS_DESC_CONTENT)
                 self.done_event.wait()
         time.sleep(1)
 
     def __handle_tor_event(self, logf, event):
         s = time.time()
         t = time.localtime(s)
-        print >>logf, "{0} {1} {2}".format(time.strftime("%Y-%m-%d %H:%M:%S"), s, event.raw_content()),
+        print >> logf, "{0} {1} {2}".format(time.strftime("%Y-%m-%d %H:%M:%S"), s, event.raw_content()),
 
     def __start_tor_client(self):
         self.c_tor_datadir = ".onionperf/client/tor/data"
@@ -313,7 +225,7 @@ class OnionPerf:
             'DataDirectory': self.c_tor_datadir,
             'Log': [
                 'NOTICE stdout',
-                #'INFO file .onionperf/client/tor/tor.log'.format(self.c_tor_datadir),
+                # 'INFO file .onionperf/client/tor/tor.log'.format(self.c_tor_datadir),
             ],
         }
 
@@ -345,7 +257,7 @@ class OnionPerf:
             'HiddenServicePort': '80 127.0.0.1:8888',
             'Log': [
                 'NOTICE stdout',
-                #'INFO file .onionperf/server/tor/tor.log',
+                # 'INFO file .onionperf/server/tor/tor.log',
             ],
         }
 
@@ -353,39 +265,3 @@ class OnionPerf:
 
         with open("{0}/hostname".format(self.s_tor_hsdir), 'r') as f:
             self.s_tor_onionurl = f.readline().strip()
-
-def find_path_helper(binpath, defaultname):
-    # find the path to tor
-    if binpath is not None:
-        binpath = os.path.abspath(os.path.expanduser(binpath))
-    else:
-        w = which_helper(defaultname)
-        if w is not None:
-            binpath = os.path.abspath(os.path.expanduser(w))
-        else:
-            logging.error("You did not specify a path to a '{0}' binary, and one does not exist in your PATH".format(defaultname))
-            return None
-    # now make sure the path exists
-    if os.path.exists(binpath):
-        logging.info("Using '{0}' binary at {1}".format(defaultname, binpath))
-    else:
-        logging.error("Path to '{0}' binary does not exist: {1}".format(defaultname, binpath))
-        return None
-    # we found it and it exists
-    return binpath
-
-def which_helper(program):
-    def is_exe(fpath):
-        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-    fpath, fname = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                return exe_file
-    return None
-
-if __name__ == '__main__': sys.exit(main())

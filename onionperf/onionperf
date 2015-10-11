@@ -1,0 +1,292 @@
+#!/usr/bin/env python
+
+import sys, os, argparse, logging
+
+import onionperf.util, onionperf.model, onionperf.analysis, onionperf.monitor
+
+DESC_MAIN = """
+OnionPerf is a utility to measure, analyze, and visualize the performance of
+Tor and Onion Services.
+\n\n
+For more information, see https://github.com/robgjansen/onionperf.
+"""
+HELP_MAIN = """
+OnionPerf must be run with a subcommand to specify a mode of operation. The
+primary mode is measure, but tools to generate TGen models and to analyze
+and visualize Tor and TGen output that is collected in the measure mode are
+also available. Use 'onionperf <subcommand> --help' for more information.
+"""
+
+DESC_MONITOR = """
+This utility connects to a running Tor (https://www.torproject.org) process on the Tor
+control port, registers for several asynchronous events, and logs the events to disk
+as they occur over time.
+"""
+HELP_MONITOR = """
+Connects to Tor on an open control port, and logs various asynchronous events
+"""
+
+DESC_MEASURE = """
+OnionPerf uses multiple processes and threads to download random data through
+Tor while tracking the performance of those downloads. The data is served and
+fetched on localhost using two TGen (traffic generator) processes, but is
+tranferred through Tor using a temporary Tor Hidden Service process and a
+client process. Tor control information and TGen performance statistics are
+logged to disk and can be later analyzed (using onionperf analyze) to
+vizualize changes in Tor performance over time.
+"""
+HELP_MEASURE = """
+Measure Tor and Onion Service Performance using TGen
+"""
+
+DESC_ANALYZE = """
+Parse results from the TGen traffic generator and Tor.
+
+This script enables processing of TGen and Tor log files and storing processed
+data in json format for plotting. It was written so that the log files
+need never be stored on disk decompressed, which is useful when log file
+sizes reach tens of gigabytes.
+
+The standard way to run this mode is to give the path to a directory tree
+under which one or several TGen/Tor log files exist:
+$ onionperf analyze shadow.data/hosts/
+
+This path will be searched for log files whose names match those created
+by OnionPerf and Shadow; additional patterns can be added with the '-e' option.
+
+A single TGen/Tor log file can also be passed on STDIN with the special '-' path:
+$ cat tgen.log | onionperf analyze -
+$ xzcat tgen.log.xz | onionperf analyze -
+
+The default mode is to filter and parse the log files using a single
+process; configure multiple worker processes using the '-m' option.
+"""
+HELP_ANALYZE = """
+Analyze Tor and TGen output
+"""
+
+DESC_VISUALIZE = """
+TODO
+"""
+HELP_VISUALIZE = """
+Visualize OnionPerf analysis results
+"""
+
+DESC_MODEL = """
+Write the TGen server and client models that OnionPerf uses in the measure mode to the specified file paths. 
+"""
+HELP_MODEL = """
+Generate TGen traffic models
+"""
+
+logging.basicConfig(format='%(asctime)s %(created)f [onionperf] [%(levelname)s] %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S')
+logging.getLogger("stem").setLevel(logging.WARN)
+
+def main():
+    # construct the options
+    main_parser = argparse.ArgumentParser(
+        description=DESC_MAIN,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)  # RawTextHelpFormatter
+
+    sub_parser = main_parser.add_subparsers(help=HELP_MAIN)
+
+    # monitor
+    monitor_parser = sub_parser.add_parser('monitor', description=DESC_MONITOR, help=HELP_MONITOR)
+    monitor_parser.set_defaults(func=monitor, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    monitor_parser.add_argument(
+        help="""the Tor control port number N""",
+        metavar="N", type=type_nonnegative_integer,
+        action="store", dest="ctlport")
+
+    monitor_parser.add_argument('-l',
+        help="""a file PATH to log Tor controller output, may be '-' for STDOUT""",
+        metavar="PATH", type=type_str_path_out,
+        action="store", dest="logpath",
+        default="-")
+
+    # measure
+    measure_parser = sub_parser.add_parser('measure', description=DESC_MEASURE, help=HELP_MEASURE)
+    measure_parser.set_defaults(func=measure, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    measure_parser.add_argument('--tor',
+        help="""a file PATH to a Tor binary""",
+        metavar="PATH", type=type_str_path_in,
+        action="store", dest="torpath",
+        default=onionperf.util.which("tor"))
+
+    measure_parser.add_argument('--tgen',
+        help="""a file PATH to a TGen binary""",
+        metavar="PATH", type=type_str_path_in,
+        action="store", dest="tgenpath",
+        default=onionperf.util.which("tgen"))
+
+    measure_parser.add_argument('-p', '--prefix',
+        help="""a directory PATH prefix where OnionPerf will run""",
+        metavar="PATH", type=type_str_path_out,
+        action="store", dest="prefix",
+        default=os.getcwd())
+
+    # analyze
+    analyze_parser = sub_parser.add_parser('analyze', description=DESC_ANALYZE, help=HELP_ANALYZE)
+    analyze_parser.set_defaults(func=analyze, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    analyze_parser.add_argument(
+        help="""The TYPE of Analysis to perform, which may be 'tgen' or 'tor'""",
+        metavar="TYPE", type=type_supported_analysis,
+        action="store", dest="atype")
+
+    analyze_parser.add_argument(
+        help="""The PATH to search for tgen and tor log files, which may be '-'
+for STDIN; each log file may end in '.xz' to enable
+inline xz decompression""",
+        metavar="PATH", type=type_str_path_in,
+        action="store", dest="searchpath")
+
+    analyze_parser.add_argument('-e', '--expression',
+        help="""Append a regex PATTERN to the list of strings used with
+re.search to find log file names in the search path""",
+        metavar="PATTERN", type=str,
+        action="append", dest="patterns",
+        default=[])
+
+    analyze_parser.add_argument('-m', '--multiproc',
+        help="""Enable multiprocessing with N worker process, use '0'
+to use the number of processor cores""",
+        metavar="N", type=type_nonnegative_integer,
+        action="store", dest="nprocesses",
+        default=1)
+
+    analyze_parser.add_argument('-p', '--prefix',
+        help="""A directory PATH prefix where the processed data
+files generated by this script will be written""",
+        metavar="PATH", type=type_str_path_out,
+        action="store", dest="prefix",
+        default=os.getcwd())
+
+    # visualize
+    vizualize_parser = sub_parser.add_parser('visualize', description=DESC_VISUALIZE, help=HELP_VISUALIZE)
+    vizualize_parser.set_defaults(func=visualize, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    # model
+    model_parser = sub_parser.add_parser('model', description=DESC_MODEL, help=HELP_MODEL)
+    model_parser.set_defaults(func=model, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    model_parser.add_argument('-d', '--domain-name',
+        help="""a STRING domain name or IP address (e.g. 'torproject.org')""",
+        metavar="STRING", type=str,
+        action="store", dest="domain_name",
+        required=True)
+
+    model_parser.add_argument('-o', '--onion-name',
+        help="""a STRING onion name (e.g. 'blahblah.onion')""",
+        metavar="STRING", type=str,
+        action="store", dest="onion_name",
+        required=True)
+
+    model_parser.add_argument('-s', '--tgen-server-filepath',
+        help="""a file PATH to save the TGen server model used by OnionPerf""",
+        metavar="PATH", type=type_str_path_out,
+        action="store", dest="server_fpath",
+        default="tgen-server.graphml.xml")
+
+    model_parser.add_argument('-t', '--tgen-torperf-client-filepath',
+        help="""a file PATH to save the TGen Torperf client model used by OnionPerf""",
+        metavar="PATH", type=type_str_path_out,
+        action="store", dest="client_fpath",
+        default="tgen-torperf-client.graphml.xml")
+
+    # get args and call the command handler for the chosen mode
+    args = main_parser.parse_args()
+    args.func(args)
+
+def monitor(args):
+    mon = onionperf.monitor.TorMonitor(args.ctlport, args.logpath)
+    try:
+        mon.run()
+    except KeyboardInterrupt:
+        pass  # the user hit ctrl+c
+
+def measure(args):
+    print args
+'''
+    # test paths
+    args.torpath = find_path_helper(args.torpath, "tor")
+    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
+
+    # validate paths and run
+    if args.torpath is not None and args.tgenpath is not None:
+        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
+        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
+        os.chdir(args.prefix)
+        op = OnionPerf(args)
+        op.run()
+    else: logging.info("Please fix path errors to continue")
+'''
+
+def analyze(args):
+    print args.atype
+    if args.atype == 'tgen':
+        args.patterns.append("tgen.*\.log")
+        tgen_anal = onionperf.analysis.TGenAnalysis()
+        tgen_anal.analyze_file("tgen.log")
+        tgen_anal.dump_to_file("tgen.xz")
+    elif args.atype == 'tor':
+        args.patterns.append("torctl.*\.log")
+        tor_anal = onionperf.analysis.TorAnalysis()
+        tor_anal.analyze_file("tor.log")
+        tor_anal.dump_to_file("tor.xz")
+
+def visualize(args):
+    # get analysis objects
+    # tgen_anal = onionperf.analysis.TGenAnalysis.from_file()
+
+    # visualize those objects
+    # onionperf.visualize...
+    pass
+
+def model(args):
+    # clean the args and create non-existent directories
+    args.client_fpath = onionperf.util.make_path(args.client_fpath)
+    args.server_fpath = onionperf.util.make_path(args.server_fpath)
+
+    # generate the models
+    # the server listens on 8888, the client uses Tor to come back directly, and using a hidden serv
+    server = onionperf.model.ListenModel(tgen_port="8888")
+    public_server_str = "{0}:8888".format(args.domain_name)
+    onion_server_str = "{0}:8890".format(args.onion_name)
+    client = onionperf.model.TorperfModel(tgen_port="8889", socksproxy="localhost:9001", tgen_servers=[public_server_str, onion_server_str])
+
+    # save to specified paths
+    server.dump_to_file(args.server_fpath)
+    client.dump_to_file(args.client_fpath)
+
+def type_nonnegative_integer(value):
+    i = int(value)
+    if i < 0: raise argparse.ArgumentTypeError("%s is an invalid non-negative int value" % value)
+    return i
+
+def type_supported_analysis(value):
+    t = value.lower()
+    if t != "tgen" and t != "tor":
+        raise argparse.ArgumentTypeError("%s is an invalid Analysis type" % value)
+    return t
+
+def type_str_path_out(value):
+    s = str(value)
+    if s == "-":
+        return s
+    p = os.path.abspath(os.path.expanduser(s))
+    onionperf.util.make_path(p)
+    return p
+
+def type_str_path_in(value):
+    s = str(value)
+    if s == "-":
+        return s
+    p = os.path.abspath(os.path.expanduser(s))
+    if not os.path.exists(p):
+        raise argparse.ArgumentTypeError("path %s does not exist" % s)
+    return p
+
+if __name__ == '__main__': sys.exit(main())
