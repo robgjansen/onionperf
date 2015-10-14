@@ -140,12 +140,16 @@ class TGenVisualization(Visualization):
             ts = time.strftime("%Y-%m-%d_%H:%M:%S")
             self.page = PdfPages("{0}tgen.onionperf.viz.{1}.pdf".format(prefix, ts))
             self.__plot_firstbyte()
+            self.__plot_byte_timeseries("firstbyte")
             self.__plot_lastbyte_all()
             self.__plot_lastbyte_median()
             self.__plot_lastbyte_mean()
             self.__plot_lastbyte_max()
+            self.__plot_byte_timeseries("lastbyte")
             self.__plot_downloads()
+            self.__plot_downloads_timeseries()
             self.__plot_errors()
+            self.__plot_errors_timeseries()
             self.__plot_errsizes_all()
             self.__plot_errsizes_median()
             self.__plot_errsizes_mean()
@@ -293,6 +297,38 @@ class TGenVisualization(Visualization):
             self.page.savefig()
             pylab.close()
 
+    def __plot_byte_timeseries(self, bytekey="lastbyte"):
+        figs = {}
+
+        for (anal, label, lineformat) in self.datasets:
+            assert anal.result is not None and 'nodes' in anal.result
+            d = anal.result['nodes']
+            lb = {}
+            for client in d:
+                if bytekey in d[client]:
+                    for b in d[client][bytekey]:
+                        bytes = int(b)
+                        if bytes not in figs: figs[bytes] = pylab.figure()
+                        if bytes not in lb: lb[bytes] = {}
+                        for sec in d[client][bytekey][b]:
+                            if sec not in lb[bytes]: lb[bytes][sec] = []
+                            lb[bytes][sec].extend(d[client][bytekey][b][sec])
+            for bytes in lb:
+                pylab.figure(figs[bytes].number)
+                x = [sec for sec in lb[bytes]]
+                x.sort()
+                y = [numpy.mean(lb[bytes][sec]) for sec in x]
+                pylab.plot(x, y, lineformat, label=label)
+
+        for bytes in sorted(figs.keys()):
+            pylab.figure(figs[bytes].number)
+            pylab.xlabel("Tick (s)")
+            pylab.ylabel("Download Time (s)")
+            pylab.title("mean time to download {0} of {1} bytes, all clients over time".format(bytekey, bytes))
+            pylab.legend(loc="lower right")
+            self.page.savefig()
+            pylab.close()
+
     def __plot_downloads(self):
         figs = {}
 
@@ -322,6 +358,38 @@ class TGenVisualization(Visualization):
             self.page.savefig()
             pylab.close()
 
+    def __plot_downloads_timeseries(self):
+        figs = {}
+
+        for (anal, label, lineformat) in self.datasets:
+            assert anal.result is not None and 'nodes' in anal.result
+            d = anal.result['nodes']
+            dls = {}
+            for client in d:
+                if "lastbyte" in d[client]:
+                    for b in d[client]["lastbyte"]:
+                        bytes = int(b)
+                        if bytes not in figs: figs[bytes] = pylab.figure()
+                        if bytes not in dls: dls[bytes] = {}
+                        for sec in d[client]["lastbyte"][b]:
+                            if sec not in dls[bytes]: dls[bytes][sec] = 0
+                            dls[bytes][sec] += len(d[client]["lastbyte"][b][sec])
+            for bytes in dls:
+                pylab.figure(figs[bytes].number)
+                x = [sec for sec in dls[bytes]]
+                x.sort()
+                y = [dls[bytes][sec] for sec in x]
+                pylab.plot(x, y, lineformat, label=label)
+
+        for bytes in sorted(figs.keys()):
+            pylab.figure(figs[bytes].number)
+            pylab.xlabel("Tick (s)")
+            pylab.ylabel("Downloads Completed (\#)")
+            pylab.title("number of {0} byte downloads completed, all clients over time".format(bytes))
+            pylab.legend(loc="lower right")
+            self.page.savefig()
+            pylab.close()
+
     def __plot_errors(self):
         figs = {}
 
@@ -346,6 +414,37 @@ class TGenVisualization(Visualization):
             pylab.xlabel("Download Errors (\#)")
             pylab.ylabel("Cumulative Fraction")
             pylab.title("number of transfer {0} errors, each client".format(code))
+            pylab.legend(loc="lower right")
+            self.page.savefig()
+            pylab.close()
+
+    def __plot_errors_timeseries(self):
+        figs = {}
+
+        for (anal, label, lineformat) in self.datasets:
+            assert anal.result is not None and 'nodes' in anal.result
+            d = anal.result['nodes']
+            dls = {}
+            for client in d:
+                if "errors" in d[client]:
+                    for code in d[client]["errors"]:
+                        if code not in figs: figs[code] = pylab.figure()
+                        if code not in dls: dls[code] = {}
+                        for sec in d[client]["errors"][code]:
+                            if sec not in dls[code]: dls[code][sec] = 0
+                            dls[code][sec] += len(d[client]["errors"][code][sec])
+            for code in dls:
+                pylab.figure(figs[code].number)
+                x = [sec for sec in dls[code]]
+                x.sort()
+                y = [dls[code][sec] for sec in x]
+                pylab.plot(x, y, lineformat, label=label)
+
+        for code in sorted(figs.keys()):
+            pylab.figure(figs[code].number)
+            pylab.xlabel("Tick (s)")
+            pylab.ylabel("Download Errors (\#)")
+            pylab.title("number of transfer {0} errors, all clients over time".format(code))
             pylab.legend(loc="lower right")
             self.page.savefig()
             pylab.close()
