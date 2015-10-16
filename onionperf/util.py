@@ -9,8 +9,7 @@ from subprocess import Popen, PIPE
 
 def make_path(path):
     p = os.path.abspath(os.path.expanduser(path))
-    dirp = os.path.dirname(p)
-    if not os.path.exists(dirp):
+    if not os.path.exists(p):
         os.makedirs(p)
     return p
 

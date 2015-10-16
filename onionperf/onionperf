@@ -3,7 +3,7 @@
 import sys, os, argparse, logging
 from itertools import cycle
 
-import onionperf.util, onionperf.model, onionperf.analysis, onionperf.monitor, onionperf.visualization
+import onionperf.util, onionperf.model, onionperf.analysis, onionperf.monitor, onionperf.visualization, onionperf.measurement
 
 DESC_MAIN = """
 OnionPerf is a utility to measure, analyze, and visualize the performance of
@@ -232,21 +232,17 @@ def monitor(args):
         pass  # the user hit ctrl+c
 
 def measure(args):
-    print args
-'''
-    # test paths
-    args.torpath = find_path_helper(args.torpath, "tor")
-    if args.torpath is not None: args.tgenpath = find_path_helper(args.tgenpath, "tgen")
+    # check paths
+    args.torpath = onionperf.util.find_path(args.torpath, "tor")
+    if args.torpath is not None: args.tgenpath = onionperf.util.find_path(args.tgenpath, "tgen")
 
     # validate paths and run
     if args.torpath is not None and args.tgenpath is not None:
-        args.prefix = os.path.abspath(os.path.expanduser(args.prefix))
-        if not os.path.exists(args.prefix): os.makedirs(args.prefix)
         os.chdir(args.prefix)
-        op = OnionPerf(args)
-        op.run()
-    else: logging.info("Please fix path errors to continue")
-'''
+        meas = onionperf.measurement.Measurement(args.torpath, args.tgenpath, args.prefix)
+        meas.run()
+    else:
+        logging.info("Please fix path errors to continue")
 
 def analyze(args):
     if args.atype == 'all' or args.atype == 'tgen':
