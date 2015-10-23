@@ -7,6 +7,9 @@ Created on Oct 1, 2015
 import os, subprocess, multiprocessing, logging, time, socket
 from signal import signal, SIGINT, SIG_IGN
 
+from flask import Flask
+from lxml import etree
+
 import stem.process
 from abc import abstractmethod, ABCMeta
 
@@ -47,7 +50,8 @@ class TGenProcess(Process):
         signal(SIGINT, SIG_IGN)  # ignore interrupts
 
         conffile = "{0}/tgen.graphml.xml".format(self.datadir_path)
-        if not os.path.exists(self.datadir_path): os.makedirs(self.datadir_path)
+        if not os.path.exists(self.datadir_path):
+            os.makedirs(self.datadir_path)
         if os.path.exists(conffile):
             os.remove(conffile)
         self.tgen_model.dump_to_file(conffile)
@@ -99,7 +103,8 @@ class TorProcess(Process):
         self.hs_service_id = None
 
     def start(self, done_event, control_port=9050, socks_port=9000, hs_port_mapping=None):
-        if not os.path.exists(self.datadir_path): os.makedirs(self.datadir_path)
+        if not os.path.exists(self.datadir_path):
+            os.makedirs(self.datadir_path)
         os.chmod(self.datadir_path, 0700)
 
         config = {
@@ -157,6 +162,71 @@ class TorProcess(Process):
         else:
             return False
 
+class FlaskServerProcess(Process):
+
+    def __init__(self, docroot_path, url_path="/onionperf"):
+        self.docroot_path = docroot_path
+        self.url_path = url_path
+        self.flask_proc = None
+        self.watchdog_proc = None
+
+        self.app = Flask(__name__, static_folder=self.docroot_path, static_url_path=self.url_path)
+        @self.app.route('{0}/<path:path>'.format(self.url_path))
+        def static_proxy(path):
+            return self.app.send_static_file(path)
+
+    def start(self, done_event):
+        if not os.path.exists(self.docroot_path):
+            os.makedirs(self.datadir_path)
+        self.watchdog_proc = multiprocessing.Process(target=FlaskServerProcess.run, args=(self, done_event,))
+        self.watchdog_proc.start()
+
+    def run(self, done_event):
+        signal(SIGINT, SIG_IGN)  # ignore interrupts
+
+        self.flask_proc = None
+        while not done_event.is_set():
+            self.flask_proc = multiprocessing.Process(target=FlaskServerProcess.__run_flask, args=(self,))
+            self.flask_proc.start()
+            while not done_event.wait(5):  # while the timeout triggers
+                if self.flask_proc is None or not self.flask_proc.is_alive():  # process has terminated
+                    self.flask_proc.join()  # collect child
+                    self.flask_proc = None  # clear
+                    break  # break out inner loop and restart process, or stop watchdog
+        # if we got here because done_event was set, make sure to stop the flask server
+        if self.flask_proc is not None:
+            self.flask_proc.terminate()
+            self.flask_proc.join()
+            self.flask_proc = None
+
+    def __run_flask(self):
+        self.app.run(debug=False, host='0.0.0.0')
+
+    def stop(self):
+        # the flask_proc was created inside the watchdog proc, so i dont know if we ever have access to that here
+        if self.flask_proc is not None:
+            self.flask_proc.terminate()
+            self.flask_proc.join()
+            self.flask_proc = None
+        if self.watchdog_proc is not None:
+            self.watchdog_proc.terminate()
+            self.watchdog_proc.join()
+            self.watchdog_proc = None
+
+    def is_alive(self):
+        if self.watchdog_proc is not None and self.watchdog_proc.is_alive() and self.flask_proc is not None and self.flask_proc.is_alive():
+            return True
+        else:
+            return False
+
+    def generate_index(self):
+        root = etree.Element("files")
+        filepaths = [f for f in os.listdir(self.docroot_path) if os.path.isfile(os.path.abspath('/'.join([self.docroot_path, f])))]
+        for filename in filepaths:
+            e = etree.SubElement(root, "file")
+            e.set("name", filename)
+        with open("{0}/index.xml".format(self.docroot_path), 'wb') as f: print >> f, etree.tostring(root, pretty_print=True, xml_declaration=True)
+
 class Measurement(object):
 
     def __init__(self, tor_bin_path, tgen_bin_path, datadir_path):
@@ -168,6 +238,7 @@ class Measurement(object):
         self.tor_server = None
         self.tor_client = None
         self.tgen_client = None
+        self.flask_server = None
 
     def run(self, do_onion=True, do_inet=False, do_local=False):
         # if ctrl-c is pressed, shutdown child processes properly
@@ -203,6 +274,10 @@ class Measurement(object):
                 self.tgen_client = TGenProcess(self.tgen_bin_path, "{0}/tgen-client".format(self.datadir_path), tgen_client_model)
                 self.tgen_client.start(self.done_event)
 
+            logging.info("Starting Flask server process...")
+            self.flask_server = FlaskServerProcess("{0}/flask-docroot".format(self.datadir_path))
+            self.flask_server.start()
+
             logging.info("Bootstrapping finished, entering heartbeat loop")
             while True:
                 logging.info("Heartbeat: {0} downloads have completed successfully".format(self.tgen_client.get_download_count()))
@@ -232,6 +307,8 @@ class Measurement(object):
                 self.tor_server.stop()
             if self.tgen_server is not None:
                 self.tgen_server.stop()
+            if self.flask_server is not None:
+                self.flask_server.stop()
 
             time.sleep(1)
             logging.disable(logging.NOTSET)
@@ -258,5 +335,8 @@ class Measurement(object):
             alive = False
         if self.tgen_client is not None and not self.tgen_client.is_alive():
             logging.warning("client tgen process is dead")
+            alive = False
+        if self.flask_server is not None and not self.flask_server.is_alive():
+            logging.warning("flask server process is dead")
             alive = False
         return alive
