@@ -10,9 +10,12 @@ from stem.control import EventType, Controller
 
 import util
 
+def get_supported_torctl_events():
+    return list(EventType)
+
 class TorMonitor(object):
 
-    def __init__(self, tor_ctl_port, filepath, events=['ORCONN', 'CIRC', 'STREAM', 'BW', 'GUARD', 'INFO', 'NOTICE', 'WARN', 'ERR', 'HS_DESC', 'BUILDTIMEOUT_SET', 'DESCCHANGED', 'NEWCONSENSUS', 'NEWDESC', 'STATUS_CLIENT', 'STATUS_GENERAL', 'STATUS_SERVER', 'CONN_BW', 'CIRC_BW', 'STREAM_BW', 'TB_EMPTY', 'HS_DESC_CONTENT']):
+    def __init__(self, tor_ctl_port, filepath, events=get_supported_torctl_events()):
         self.tor_ctl_port = tor_ctl_port
         self.filepath = filepath
         self.events = events
