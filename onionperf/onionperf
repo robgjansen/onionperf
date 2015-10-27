@@ -138,21 +138,18 @@ def main():
 
     measure_parser.add_argument('-l', '--do-local',
         help="""measure download times to localhost""",
-        metavar="BOOL",
         action="store_true", dest="do_local",
         default=False)
 
     measure_parser.add_argument('-o', '--do-onion',
         help="""measure download times over Tor to an ephemeral onion service""",
-        metavar="BOOL",
-        action="store_false", dest="do_onion",
-        default=True)
+        action="store_true", dest="do_onion",
+        default=False)
 
     measure_parser.add_argument('-i', '--do-inet',
         help="""measure download times over Tor back to localhost""",
-        metavar="BOOL",
-        action="store_false", dest="do_inet",
-        default=True)
+        action="store_true", dest="do_inet",
+        default=False)
 
     # analyze
     analyze_parser = sub_parser.add_parser('analyze', description=DESC_ANALYZE, help=HELP_ANALYZE)

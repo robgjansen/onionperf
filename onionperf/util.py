@@ -112,7 +112,7 @@ class FileWritable(Writable):
             self.file.write(msg)
 
     def open(self):
-        if self.compress:
+        if self.do_compress:
             self.nullf = open("/dev/null", 'a')
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
             self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=self.nullf, stderr=self.nullf)
