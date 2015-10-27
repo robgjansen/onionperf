@@ -270,20 +270,20 @@ class Measurement(object):
 
                 tor_server_datadir = "{0}/tor-server".format(self.datadir_path)
                 tor_server_logpath = "{0}/onionperf.tor.log".format(tor_server_datadir)
-                logging.info("logging Tor events from port {0} to {1}".format(9050, tor_server_logpath))
+                logging.info("logging Tor events from port {0} to {1}".format(59050, tor_server_logpath))
                 tor_server_writable = util.FileWritable(tor_server_logpath)
                 self.tor_server = TorProcess(self.tor_bin_path, tor_server_datadir, tor_server_writable)
-                self.tor_server.start(self.done_event, control_port=9050, socks_port=0, hs_port_mapping={58888:58888})
+                self.tor_server.start(self.done_event, control_port=59050, socks_port=0, hs_port_mapping={58888:58888})
 
             if do_onion or do_inet:
                 logging.info("Starting tor client process...")
 
                 tor_client_datadir = "{0}/tor-client".format(self.datadir_path)
                 tor_client_logpath = "{0}/onionperf.tor.log".format(tor_client_datadir)
-                logging.info("logging Tor events from port {0} to {1}".format(9051, tor_client_logpath))
+                logging.info("logging Tor events from port {0} to {1}".format(59051, tor_client_logpath))
                 tor_client_writable = util.RotateFileWritable(tor_client_logpath)
                 self.tor_client = TorProcess(self.tor_bin_path, tor_client_datadir, tor_client_writable)
-                self.tor_client.start(self.done_event, control_port=9051, socks_port=9001, hs_port_mapping=None)
+                self.tor_client.start(self.done_event, control_port=59051, socks_port=59001, hs_port_mapping=None)
 
             server_urls = []
             if do_onion:
