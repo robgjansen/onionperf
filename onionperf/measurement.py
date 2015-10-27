@@ -4,7 +4,7 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import os, subprocess, multiprocessing, logging, time, socket
+import os, subprocess, multiprocessing, logging, time, socket, re
 from signal import signal, SIGINT, SIG_IGN
 
 from flask import Flask
@@ -13,8 +13,8 @@ from lxml import etree
 import stem.process
 from abc import abstractmethod, ABCMeta
 
-import monitor, model
-import re
+import monitor, model, util
+
 
 class Process(object):
 
@@ -34,10 +34,11 @@ class Process(object):
 
 class TGenProcess(Process):
 
-    def __init__(self, bin_path, datadir_path, tgen_model):
+    def __init__(self, bin_path, datadir_path, tgen_model, writable):
         self.bin_path = bin_path
         self.datadir_path = datadir_path
         self.tgen_model = tgen_model
+        self.writable = writable
         self.tgen_proc = None
         self.tgen_subp = None
         self.tgen_log_path = None
@@ -56,17 +57,19 @@ class TGenProcess(Process):
             os.remove(conffile)
         self.tgen_model.dump_to_file(conffile)
 
-        self.tgen_log_path = "{0}/onionperf.tgen.log".format(self.datadir_path)
-        logging.info("logging TGen process output to {0}".format(self.tgen_log_path))
-        with open(self.tgen_log_path, 'a') as logf:
-            self.tgen_subp = None
-            while not done_event.is_set():
-                self.tgen_subp = subprocess.Popen([self.bin_path, conffile], stdout=logf, stderr=logf)
-                while not done_event.wait(5):  # while the timeout triggers
-                    if self.tgen_subp.poll() is not None:  # process has terminated
-                        self.tgen_subp.wait()  # collect child
-                        self.tgen_subp = None  # clear
-                        break  # break out inner loop and restart process
+        # if self.writable is None:
+        #    self.tgen_log_path = "{0}/onionperf.tgen.log".format(self.datadir_path)
+        #    logging.info("logging TGen process output to {0}".format(self.tgen_log_path))
+        #    self.writable = FileWritable(self.tgen_log_path)
+
+        self.tgen_subp = None
+        while not done_event.is_set():
+            self.tgen_subp = subprocess.Popen([self.bin_path, conffile], stdout=self.writable, stderr=self.writable)
+            while not done_event.wait(5):  # while the timeout triggers
+                if self.tgen_subp.poll() is not None:  # process has terminated
+                    self.tgen_subp.wait()  # collect child
+                    self.tgen_subp = None  # clear
+                    break  # break out inner loop and restart process
 
     def is_alive(self):
         if self.tgen_subp is not None and self.tgen_subp.poll() is None and self.tgen_proc is not None and self.tgen_proc.is_alive():
@@ -95,9 +98,10 @@ class TGenProcess(Process):
 
 class TorProcess(Process):
 
-    def __init__(self, bin_path, datadir_path):
+    def __init__(self, bin_path, datadir_path, writable):
         self.bin_path = bin_path
         self.datadir_path = datadir_path
+        self.writable = writable
         self.tor_subp = None
         self.tor_monitor_proc = None
         self.hs_service_id = None
@@ -129,9 +133,12 @@ class TorProcess(Process):
         self.tor_subp = stem.process.launch_tor_with_config(config, tor_cmd=self.bin_path, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=False)
         self.control_port = control_port
 
-        self.tor_log_path = "{0}/onionperf.tor.log".format(self.datadir_path)
-        logging.info("logging Tor events from port {0} to {1}".format(control_port, self.tor_log_path))
-        tor_monitor = monitor.TorMonitor(control_port, self.tor_log_path)
+        # if self.writable is None:
+        #    self.tor_log_path = "{0}/onionperf.tor.log".format(self.datadir_path)
+        #    logging.info("logging Tor events from port {0} to {1}".format(control_port, self.tor_log_path))
+        #    self.writable = FileWritable(self.tor_log_path)
+
+        tor_monitor = monitor.TorMonitor(control_port, self.writable)
         self.tor_monitor_proc = multiprocessing.Process(target=monitor.TorMonitor.run, args=(tor_monitor,))
         self.tor_monitor_proc.start()
 
@@ -247,18 +254,36 @@ class Measurement(object):
             logging.info("Log files for the client and server processes will be placed in {0}".format(self.datadir_path))
             self.done_event = multiprocessing.Event()
 
-            logging.info("Starting tgen server process...")
-            tgen_server_model = model.ListenModel(tgen_port="58888")
-            self.tgen_server = TGenProcess(self.tgen_bin_path, "{0}/tgen-server".format(self.datadir_path), tgen_server_model)
-            self.tgen_server.start(self.done_event)
+            if do_local or do_onion or do_inet:
+                logging.info("Starting tgen server process...")
 
-            logging.info("Starting tor server process...")
-            self.tor_server = TorProcess(self.tor_bin_path, "{0}/tor-server".format(self.datadir_path))
-            self.tor_server.start(self.done_event, control_port=9050, socks_port=0, hs_port_mapping={58888:58888})
+                tgen_server_model = model.ListenModel(tgen_port="58888")
+                tgen_server_datadir = "{0}/tgen-server".format(self.datadir_path)
+                tgen_server_logpath = "{0}/onionperf.tgen.log".format(tgen_server_datadir)
+                logging.info("logging TGen process output to {0}".format(tgen_server_logpath))
+                tgen_server_writable = util.FileWritable(tgen_server_logpath)
+                self.tgen_server = TGenProcess(self.tgen_bin_path, tgen_server_datadir, tgen_server_model, tgen_server_writable)
+                self.tgen_server.start(self.done_event)
 
-            logging.info("Starting tor client process...")
-            self.tor_client = TorProcess(self.tor_bin_path, "{0}/tor-client".format(self.datadir_path))
-            self.tor_client.start(self.done_event, control_port=9051, socks_port=9001, hs_port_mapping=None)
+            if do_onion:
+                logging.info("Starting tor server process...")
+
+                tor_server_datadir = "{0}/tor-server".format(self.datadir_path)
+                tor_server_logpath = "{0}/onionperf.tor.log".format(tor_server_datadir)
+                logging.info("logging Tor events from port {0} to {1}".format(9050, tor_server_logpath))
+                tor_server_writable = util.FileWritable(tor_server_logpath)
+                self.tor_server = TorProcess(self.tor_bin_path, tor_server_datadir, tor_server_writable)
+                self.tor_server.start(self.done_event, control_port=9050, socks_port=0, hs_port_mapping={58888:58888})
+
+            if do_onion or do_inet:
+                logging.info("Starting tor client process...")
+
+                tor_client_datadir = "{0}/tor-client".format(self.datadir_path)
+                tor_client_logpath = "{0}/onionperf.tor.log".format(tor_client_datadir)
+                logging.info("logging Tor events from port {0} to {1}".format(9051, tor_client_logpath))
+                tor_client_writable = util.RotateFileWritable(tor_client_logpath)
+                self.tor_client = TorProcess(self.tor_bin_path, tor_client_datadir, tor_client_writable)
+                self.tor_client.start(self.done_event, control_port=9051, socks_port=9001, hs_port_mapping=None)
 
             server_urls = []
             if do_onion:
@@ -268,10 +293,16 @@ class Measurement(object):
             if do_local:
                 server_urls.append("127.0.0.1:58888")
 
+            tgen_client_writable = None
             if len(server_urls) > 0:
                 logging.info("Starting tgen client process...")
+
                 tgen_client_model = model.TorperfModel(tgen_port="58889", tgen_servers=server_urls, socksproxy="127.0.0.1:9001")
-                self.tgen_client = TGenProcess(self.tgen_bin_path, "{0}/tgen-client".format(self.datadir_path), tgen_client_model)
+                tgen_client_datadir = "{0}/tgen-client".format(self.datadir_path)
+                tgen_client_logpath = "{0}/onionperf.tgen.log".format(tgen_client_datadir)
+                logging.info("logging TGen process output to {0}".format(tgen_client_logpath))
+                tgen_client_writable = util.RotateFileWritable(tgen_client_logpath)
+                self.tgen_client = TGenProcess(self.tgen_bin_path, tgen_client_datadir, tgen_client_model, tgen_client_writable)
                 self.tgen_client.start(self.done_event)
 
             logging.info("Starting Flask server process...")

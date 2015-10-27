@@ -94,9 +94,9 @@ class Analysis(object):
         if not os.path.exists(output_prefix): os.makedirs(output_prefix)
         filepath = "{0}/{1}".format(output_prefix, filename)
 
-        output = util.DataSink(filepath, compress=compress)
+        output = util.FileWritable(filepath, do_compress=compress)
         output.open()
-        json.dump(self.result, output.get(), sort_keys=True, separators=(',', ': '), indent=2)
+        json.dump(self.result, output.file, sort_keys=True, separators=(',', ': '), indent=2)
         output.close()
 
         print >> sys.stderr, "all done dumping stats to {0}".format(output.filename)
@@ -143,6 +143,15 @@ class TorAnalysis(Analysis):
 
     def new_parser(self, source):
         return TorParser(source)
+
+class TorPerfAnalysis(Analysis):
+
+    @property
+    def default_filename(self):
+        return "stats.torperf.csv"
+
+    def new_parser(self, source):
+        return TorPerfParser(source)
 
 class Parser(object):
     __metaclass__ = ABCMeta
@@ -296,6 +305,18 @@ class TorParser(Parser):
 
         print >> sys.stderr, "done merging results: {0} boot success count, {1} boot error count, {2} files with names, {3} files without names, {4} total bytes read, {5} total bytes written".format(success_count, error_count, name_count, noname_count, total_read, total_write)
         return d
+
+class TorPerfParser(Parser):
+
+    def __init__(self, source):
+        self.source = source
+
+    def parse(self):
+        pass
+
+    def merge(self, parsers):
+        # not yet supported
+        pass
 
 '''
 from stem.response import ControlMessage, convert

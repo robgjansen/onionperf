@@ -6,6 +6,9 @@ Created on Oct 1, 2015
 
 import sys, os, logging
 from subprocess import Popen, PIPE
+from cStringIO import StringIO
+from abc import ABCMeta, abstractmethod
+import shutil, time
 
 def make_path(path):
     p = os.path.abspath(os.path.expanduser(path))
@@ -74,33 +77,75 @@ class DataSource(object):
         if self.source is not None: self.source.close()
         if self.xzproc is not None: self.xzproc.wait()
 
-class DataSink(object):
-    def __init__(self, filename, compress=False):
+class Writable(object):
+    __metaclass__ = ABCMeta
+
+    @abstractmethod
+    def write(self, msg):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+class FileWritable(Writable):
+
+    def __init__(self, filename, do_compress=False):
         self.filename = filename
-        self.compress = compress
-        self.sink = None
+        self.do_compress = do_compress
+        self.file = None
         self.xzproc = None
         self.ddproc = None
         self.nullf = None
 
-    def open(self):
         if self.filename == '-':
-            self.sink = sys.stdout
-        elif self.compress or self.filename.endswith(".xz"):
+            self.file = sys.stdout
+        elif self.do_compress or self.filename.endswith(".xz"):
+            self.do_compress = True
             if not self.filename.endswith(".xz"):
                 self.filename += ".xz"
+
+    def write(self, msg):
+        if self.file is None:
+            self.file = self.open()
+        if self.file is not None:
+            self.file.write(msg)
+
+    def open(self):
+        if self.compress:
             self.nullf = open("/dev/null", 'a')
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
             self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=self.nullf, stderr=self.nullf)
-            self.sink = self.xzproc.stdin
+            self.file = self.xzproc.stdin
         else:
-            self.sink = open(self.filename, 'w')
-
-    def get(self):
-        return self.sink
+            self.file = open(self.filename, 'w')
 
     def close(self):
-        if self.sink is not None: self.sink.close()
-        if self.xzproc is not None: self.xzproc.wait()
-        if self.ddproc is not None: self.ddproc.wait()
-        if self.nullf is not None: self.nullf.close()
+        if self.file is not None:
+            self.file.close()
+
+class RotateFileWritable(FileWritable):
+
+    def rotate_file(self):
+        base = os.path.basename(self.filename)
+        base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
+        ts = time.strftime("%Y-%m-%d_%H:%M:%S")
+        new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
+        new_filename = self.filename.replace(base, new_base)
+        shutil.copy2(self.filename, new_filename)
+        self.file.truncate(0)
+        return new_filename
+
+class MemoryWritable(Writable):
+
+    def __init__(self):
+        self.str_buffer = StringIO()
+
+    def write(self, msg):
+        self.str_buffer.write()
+
+    def readline(self):
+        return self.str_buffer.readline()
+
+    def close(self):
+        self.str_buffer.close()
