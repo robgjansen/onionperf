@@ -134,24 +134,24 @@ def main():
         help="""a directory PATH prefix where OnionPerf will run""",
         metavar="PATH", type=type_str_path_out,
         action="store", dest="prefix",
-        default=os.getcwd())
+        default=os.getcwd() + "/onionperf-data")
 
     measure_parser.add_argument('-l', '--do-local',
         help="""measure download times to localhost""",
-        metavar="PATH", type=type_str_path_out,
-        action="store", dest="do_local",
+        metavar="BOOL",
+        action="store_true", dest="do_local",
         default=False)
 
     measure_parser.add_argument('-o', '--do-onion',
         help="""measure download times over Tor to an ephemeral onion service""",
-        metavar="PATH", type=type_str_path_out,
-        action="store", dest="do_onion",
+        metavar="BOOL",
+        action="store_false", dest="do_onion",
         default=True)
 
     measure_parser.add_argument('-i', '--do-inet',
         help="""measure download times over Tor back to localhost""",
-        metavar="PATH", type=type_str_path_out,
-        action="store", dest="do_inet",
+        metavar="BOOL",
+        action="store_false", dest="do_inet",
         default=True)
 
     # analyze
