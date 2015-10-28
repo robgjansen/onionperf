@@ -5,7 +5,7 @@ Created on Oct 1, 2015
 '''
 
 import sys, os, logging
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, STDOUT
 from cStringIO import StringIO
 from abc import ABCMeta, abstractmethod
 import shutil, time
@@ -96,7 +96,6 @@ class FileWritable(Writable):
         self.file = None
         self.xzproc = None
         self.ddproc = None
-        self.nullf = None
 
         if self.filename == '-':
             self.file = sys.stdout
@@ -106,19 +105,16 @@ class FileWritable(Writable):
                 self.filename += ".xz"
 
     def write(self, msg):
-        if self.file is None:
-            self.file = self.open()
-        if self.file is not None:
-            self.file.write(msg)
+        if self.file is None: self.open()
+        if self.file is not None: self.file.write(msg)
 
     def open(self):
         if self.do_compress:
-            self.nullf = open("/dev/null", 'a')
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
-            self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=self.nullf, stderr=self.nullf)
+            self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=open(os.devnull, 'w'), stderr=STDOUT)
             self.file = self.xzproc.stdin
         else:
-            self.file = open(self.filename, 'w')
+            self.file = open(self.filename, 'a')
 
     def rotate_file(self):
         ## FIXME I dont think this will work if do_compress is True
