@@ -120,13 +120,8 @@ class FileWritable(Writable):
         else:
             self.file = open(self.filename, 'w')
 
-    def close(self):
-        if self.file is not None:
-            self.file.close()
-
-class RotateFileWritable(FileWritable):
-
     def rotate_file(self):
+        ## FIXME I dont think this will work if do_compress is True
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
         ts = time.strftime("%Y-%m-%d_%H:%M:%S")
@@ -135,6 +130,10 @@ class RotateFileWritable(FileWritable):
         shutil.copy2(self.filename, new_filename)
         self.file.truncate(0)
         return new_filename
+
+    def close(self):
+        if self.file is not None:
+            self.file.close()
 
 class MemoryWritable(Writable):
 

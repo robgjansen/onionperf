@@ -130,6 +130,12 @@ def main():
         action="store", dest="tgenpath",
         default=onionperf.util.which("tgen"))
 
+    measure_parser.add_argument('--twistd',
+        help="""a file PATH to a twistd binary""",
+        metavar="PATH", type=type_str_path_in,
+        action="store", dest="twistdpath",
+        default=onionperf.util.which("twistd"))
+
     measure_parser.add_argument('-p', '--prefix',
         help="""a directory PATH prefix where OnionPerf will run""",
         metavar="PATH", type=type_str_path_out,
@@ -270,7 +276,7 @@ def measure(args):
     # validate paths and run
     if args.torpath is not None and args.tgenpath is not None:
         os.chdir(args.prefix)
-        meas = onionperf.measurement.Measurement(args.torpath, args.tgenpath, args.prefix)
+        meas = onionperf.measurement.Measurement(args.torpath, args.tgenpath, args.twistdpath, args.prefix)
         meas.run(do_onion=args.do_onion, do_inet=args.do_inet, do_local=args.do_local)
     else:
         logging.info("Please fix path errors to continue")
