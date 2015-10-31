@@ -4,40 +4,77 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import os, subprocess, threading, Queue, logging, time, re
+import os, subprocess, threading, Queue, logging, time, re, shlex
 import stem, stem.process, stem.version, stem.util.str_tools
 from lxml import etree
 
 import monitor, model, util
 
-def getlines_task(instream, q):
+def readline_thread_task(instream, q):
+    # wait for lines from stdout until the EOF
     for line in iter(instream.readline, b''): q.put(line)
 
-def watchdog_task(subp, writable, done_ev):
-    # get another helper to block on the subprocess stdout
-    q = Queue.Queue()
-    t = threading.Thread(target=getlines_task, args=(subp.stdout, q))
-    # t.setDaemon(True)
-    t.start()
+def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_str, ready_ev):
 
-    while subp.poll() is None and done_ev.is_set() is False:
-        # we should still be collecting output
-        try:
-            while True:
-                line = q.get(True, 1)
+    # launch or re-launch our sub process until we are told to stop
+    while done_ev.is_set() is False:
+        stdin_handle = subprocess.PIPE if send_stdin is not None else None
+        subp = subprocess.Popen(shlex.split(cmd), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=stdin_handle)
+
+        # send some data to stdin if requested
+        if send_stdin is not None:
+            subp.stdin.write(send_stdin)
+            subp.stdin.close()
+
+        # wait for a string to appear in stdout if requested
+        if ready_search_str is not None:
+            boot_re = re.compile(ready_search_str)
+            for line in iter(subp.stdout.readline, b''):
                 writable.write(line)
-        except Queue.Empty:
-            continue
+                if boot_re.search(line):
+                    break  # got it!
 
-    # if the process is still running, stop it
-    if subp.poll() is None:  # no exit code to collect
-        subp.terminate()
-        subp.wait()
+        # now the process is running *and* 'ready'
+        if ready_ev is not None:
+            ready_ev.set()
 
-    # flush any remaining lines
-    subp.stdout.close()
-    # t.join()
-    while not q.empty(): writable.write(q.get_nowait())
+        # a helper will block on stdout and return lines back to us in a queue
+        stdout_q = Queue.Queue()
+        t = threading.Thread(target=readline_thread_task, args=(subp.stdout, stdout_q))
+        t.start()
+
+        # collect output from the helper and write it, continuously checking to make
+        # sure that the subprocess is still alive and the master doesn't want us to quit
+        while subp.poll() is None and done_ev.is_set() is False:
+            try:
+                # collect lines until the queue is empty for a full second
+                while True:
+                    line = stdout_q.get(True, 1)
+                    writable.write(line)
+            except Queue.Empty:
+                # the queue is empty and the get() timed out, recheck loop conditions
+                continue
+
+        # either the process died, or we should shut down gracefully
+
+        # if the process is still running, stop it
+        if subp.poll() is None:
+            # we collected no exit code, so it is still running
+            subp.terminate()
+            subp.wait()
+
+        # the subp should be stopped now, flush any remaining lines
+        subp.stdout.close()
+
+        # the helper should stop since stdout was closed
+        t.join()
+
+        # helper thread is done, make sure we drain the remaining lines from the stdout queue
+        while not stdout_q.empty():
+            writable.write(stdout_q.get_nowait())
+        # now loop around: either the master asked us to stop, or the subp died and we relaunch it
+
+    # master asked us to stop, close the writable before exiting thread
     writable.close()
 
 class Measurement(object):
@@ -145,8 +182,9 @@ class Measurement(object):
         tgen_writable = util.FileWritable(tgen_logpath)
         logging.info("logging TGen client process output to {0}".format(tgen_logpath))
 
-        tgen_subp = subprocess.Popen([self.tgen_bin_path, tgen_confpath], cwd=tgen_datadir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        tgen_watchdog = threading.Thread(target=watchdog_task, name="tgen_{0}_watchdog".format(name), args=(tgen_subp, tgen_writable, self.done_event))
+        tgen_cmd = "{0} {1}".format(self.tgen_bin_path, tgen_confpath)
+        tgen_args = (tgen_cmd, tgen_datadir, tgen_writable, self.done_event, None, None, None)
+        tgen_watchdog = threading.Thread(target=watchdog_thread_task, name="tgen_{0}_watchdog".format(name), args=tgen_args)
         tgen_watchdog.start()
         self.threads.append(tgen_watchdog)
 
@@ -155,7 +193,7 @@ class Measurement(object):
     def __start_twistd(self):
         logging.info("Starting Twistd server process...")
 
-        twisted_datadir = "{0}/twisted-data".format(self.datadir_path)
+        twisted_datadir = "{0}/twistd".format(self.datadir_path)
         if not os.path.exists(twisted_datadir): os.makedirs(twisted_datadir)
 
         twisted_logpath = "{0}/onionperf.twisted.log".format(twisted_datadir)
@@ -167,8 +205,8 @@ class Measurement(object):
         self.__generate_index(twisted_docroot)
 
         twisted_cmd = "{0} -n -l - web --port 50080 --path {1}".format(self.twistd_bin_path, twisted_docroot)
-        twisted_subp = subprocess.Popen(twisted_cmd.split(), cwd=twisted_datadir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        twisted_watchdog = threading.Thread(target=watchdog_task, name="twistd_watchdog", args=(twisted_subp, twisted_writable, self.done_event))
+        twisted_args = (twisted_cmd, twisted_datadir, twisted_writable, self.done_event, None, None, None)
+        twisted_watchdog = threading.Thread(target=watchdog_thread_task, name="twistd_watchdog", args=twisted_args)
         twisted_watchdog.start()
         self.threads.append(twisted_watchdog)
         logging.info("twistd web server running at 0.0.0.0:{0}".format(50080))
@@ -197,25 +235,20 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards
 
         # tor_subp = stem.process.launch_tor_with_config(tor_config, tor_cmd=self.tor_bin_path, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=False)
         tor_cmd = "{0} -f -".format(self.tor_bin_path)
-        tor_subp = subprocess.Popen(tor_cmd.split(), cwd=tor_datadir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE)
-        tor_subp.stdin.write(stem.util.str_tools._to_bytes(tor_config))
-        tor_subp.stdin.close()
-
-        # wait for Tor to bootstrap
-        boot_re = re.compile('Bootstrapped 100')
-        for line in iter(tor_subp.stdout.readline, b''):
-            tor_writable.write(line)
-            if boot_re.search(line): break
-
-        tor_watchdog = threading.Thread(target=watchdog_task, name="tor_{0}_watchdog".format(name), args=(tor_subp, tor_writable, self.done_event))
+        tor_stdin_bytes = stem.util.str_tools._to_bytes(tor_config)
+        tor_ready_str = "Bootstrapped 100"
+        tor_ready_ev = threading.Event()
+        tor_args = (tor_cmd, tor_datadir, tor_writable, self.done_event, tor_stdin_bytes, tor_ready_str, tor_ready_ev)
+        tor_watchdog = threading.Thread(target=watchdog_thread_task, name="tor_{0}_watchdog".format(name), args=tor_args)
         tor_watchdog.start()
         self.threads.append(tor_watchdog)
+
+        # wait until Tor finishes bootstrapping
+        tor_ready_ev.wait()
 
         torctl_logpath = "{0}/onionperf.torctl.log".format(tor_datadir)
         torctl_writable = util.FileWritable(torctl_logpath)
         logging.info("Logging Tor {0} control port monitor output to {1}".format(name, torctl_logpath))
-
-        time.sleep(5)
 
         torctl_events = [e for e in monitor.get_supported_torctl_events() if e not in ['DEBUG', 'INFO', 'NOTICE', 'WARN', 'ERR']]
         torctl_monitor = monitor.TorMonitor(control_port, torctl_writable, events=torctl_events)
