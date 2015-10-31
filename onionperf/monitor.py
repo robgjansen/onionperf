@@ -18,7 +18,7 @@ class TorMonitor(object):
         self.writable = writable
         self.events = events
 
-    def run(self):
+    def run(self, done_ev=None):
         with stem.control.Controller.from_port(port=self.tor_ctl_port) as torctl:
             torctl.authenticate()
 
@@ -36,12 +36,12 @@ class TorMonitor(object):
 
             # let stem run its threads and log all of the events, until user interrupts
             try:
-                while True:
+                while done_ev is None or not done_ev.is_set():
                     # if self.filepath != '-' and os.path.exists(self.filepath):
                     #    with open(self.filepath, 'rb') as sizef:
                     #        msg = "tor-ctl-logger[port={0}] logged {1} bytes to {2}, press CTRL-C to quit".format(self.tor_ctl_port, os.fstat(sizef.fileno()).st_size, self.filepath)
                     #        logging.info(msg)
-                    time.sleep(60)
+                    time.sleep(1)
             except KeyboardInterrupt:
                 pass  # the user hit ctrl+c
 
