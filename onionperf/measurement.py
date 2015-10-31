@@ -123,13 +123,23 @@ class Measurement(object):
 
                 logging.info("Bootstrapping finished, entering heartbeat loop")
                 time.sleep(1)
+                broken_count = 0
                 while True:
                     logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count(tgen_client_logpath)))
-                    if self.__is_alive():
-                        logging.info("All helper processes seem to be alive :)")
-                    else:
-                        logging.warning("Some parallel components have died :(")
-                        logging.info("Exiting now, call run() again to attempt a restart")
+
+                    while broken_count < 60:
+                        if self.__is_alive():
+                            logging.info("All helper processes seem to be alive :)")
+                            broken_count = 0
+                            break
+                        else:
+                            logging.warning("Some parallel components have died :(")
+                            broken_count += 1
+                            logging.info("Waiting 60 seconds for watchdog to reboot subprocess...")
+                            time.sleep(60)
+
+                    if broken_count >= 60:
+                        logging.info("We've been in a broken state for 60 minutes, giving up and exiting now")
                         break
                     logging.info("Main process will now sleep for 1 hour (helper processes run on their own schedule)")
                     logging.info("press CTRL-C for graceful shutdown...")
