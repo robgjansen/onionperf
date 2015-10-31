@@ -94,10 +94,14 @@ class Measurement(object):
 
         # if ctrl-c is pressed, shutdown child processes properly
         try:
-            # make sure tor supports ephemeral HS (version >= 0.2.7.1-alpha)?
-            if do_onion and stem.version.get_system_tor_version(self.tor_bin_path) < stem.version.Requirement.ADD_ONION:
-                logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, aborting")
-                return
+            # make sure stem and Tor supports ephemeral HS (version >= 0.2.7.1-alpha)?
+            if do_onion:
+                if 'ADD_ONION' not in stem.version.Requirement:
+                    logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, aborting")
+                    return
+                if stem.version.get_system_tor_version(self.tor_bin_path) < stem.version.Requirement.ADD_ONION:
+                    logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, aborting")
+                    return
 
             logging.info("Bootstrapping started...")
             logging.info("Log files for the client and server processes will be placed in {0}".format(self.datadir_path))
