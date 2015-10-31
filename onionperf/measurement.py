@@ -4,7 +4,7 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import os, subprocess, threading, Queue, logging, time, socket, re
+import os, subprocess, threading, Queue, logging, time, re
 import stem, stem.process, stem.version, stem.util.str_tools
 from lxml import etree
 
@@ -76,10 +76,11 @@ class Measurement(object):
 
             server_urls = []
             if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:58888".format(self.hs_service_id))
-            if do_inet: server_urls.append("{0}:58888".format(self.__get_ip_address()))
+            if do_inet: server_urls.append("{0}:58888".format(util.get_ip_address()))
 
             if do_onion or do_inet:
                 assert len(server_urls) > 0
+
                 tgen_client_logpath = self.__start_tgen_client(server_urls)
                 self.__start_twistd()
 
@@ -232,11 +233,6 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards
                 logging.info("Ephemeral hidden service is available at {0}.onion".format(response.service_id))
 
         return torctl_logpath
-
-    def __get_ip_address(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
 
     def __generate_index(self, docroot_path):
         root = etree.Element("files")

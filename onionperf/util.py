@@ -4,7 +4,7 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import sys, os, logging
+import sys, os, socket, logging
 from subprocess import Popen, PIPE, STDOUT
 from cStringIO import StringIO
 from abc import ABCMeta, abstractmethod
@@ -52,6 +52,11 @@ def which(program):
 
 def timestamp_to_seconds(stamp):  # unix timestamp
     return float(stamp)
+
+def get_ip_address(self):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    return s.getsockname()[0]
 
 class DataSource(object):
     def __init__(self, filename, compress=False):
@@ -117,7 +122,7 @@ class FileWritable(Writable):
             self.file = open(self.filename, 'a')
 
     def rotate_file(self):
-        ## FIXME I dont think this will work if do_compress is True
+        # # FIXME I dont think this will work if do_compress is True
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
         ts = time.strftime("%Y-%m-%d_%H:%M:%S")
