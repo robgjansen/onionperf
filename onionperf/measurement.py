@@ -96,11 +96,13 @@ class Measurement(object):
         try:
             # make sure stem and Tor supports ephemeral HS (version >= 0.2.7.1-alpha)?
             if do_onion:
-                if 'ADD_ONION' not in stem.version.Requirement:
-                    logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, aborting")
-                    return
-                if stem.version.get_system_tor_version(self.tor_bin_path) < stem.version.Requirement.ADD_ONION:
-                    logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, aborting")
+                try:
+                    tor_version = stem.version.get_system_tor_version(self.tor_bin_path)
+                    if tor_version < stem.version.Requirement.ADD_ONION:
+                        logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, you have {0}, aborting".format(tor_version))
+                        return
+                except:
+                    logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, you have {0}, aborting".format(stem.__version__))
                     return
 
             logging.info("Bootstrapping started...")
