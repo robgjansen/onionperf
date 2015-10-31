@@ -260,6 +260,9 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards
         torctl_writable = util.FileWritable(torctl_logpath)
         logging.info("Logging Tor {0} control port monitor output to {1}".format(name, torctl_logpath))
 
+        # give a few seconds to make sure Tor had time to start listening on the control port
+        time.sleep(3)
+
         torctl_events = [e for e in monitor.get_supported_torctl_events() if e not in ['DEBUG', 'INFO', 'NOTICE', 'WARN', 'ERR']]
         torctl_monitor = monitor.TorMonitor(control_port, torctl_writable, events=torctl_events)
         torctl_helper = threading.Thread(target=monitor.TorMonitor.run, name="torctl_{0}_helper".format(name), args=(torctl_monitor,))
