@@ -158,11 +158,13 @@ class Measurement(object):
                     torctl.authenticate()
                     torctl.remove_ephemeral_hidden_service(self.hs_service_id)
 
-            logging.disable(logging.INFO)
+#            logging.disable(logging.INFO)
             self.done_event.set()
-            for t in self.threads: t.join()
+            for t in self.threads:
+                logging.info("Joining {0} thread".format(t.getName()))
+                t.join()
             time.sleep(1)
-            logging.disable(logging.NOTSET)
+#            logging.disable(logging.NOTSET)
 
             logging.info("Child processes terminated")
             logging.info("Child process cleanup complete!")
