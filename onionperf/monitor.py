@@ -54,3 +54,7 @@ class TorMonitor(object):
         s = time.time()
         # t = time.localtime(s)
         writable.write("{0} {1} {2}".format(time.strftime("%Y-%m-%d %H:%M:%S"), s, msg))
+
+def tor_monitor_run(tor_ctl_port, writable, events, done_ev):
+    torctl_monitor = TorMonitor(tor_ctl_port, writable, events)
+    torctl_monitor.run(done_ev=done_ev)
