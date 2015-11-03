@@ -4,7 +4,7 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import os, subprocess, threading, Queue, logging, time, re, shlex
+import os, subprocess, threading, Queue, logging, time, datetime, re, shlex
 import stem, stem.process, stem.version, stem.util.str_tools
 from lxml import etree
 
@@ -77,6 +77,46 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
     # master asked us to stop, close the writable before exiting thread
     writable.close()
 
+def logrotate_thread_task(writables, done_ev):
+    next_midnight = None
+
+    while not done_ev.wait(1):
+        # get time
+        now = datetime.datetime.today()
+
+        # setup the next expiration time (midnight tonight)
+        if next_midnight is None:
+            oneday = datetime.timedelta(1)
+            tomorrow = now + oneday
+            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)
+
+        # if we are past midnight, launch the rotate task
+        if (now - next_midnight).total_seconds() >= 0:
+            next_midnight = None
+            for w in writables:
+                w.rotate_file()
+
+def logrotate_parsetorperf_thread_task(tgen_writable, torctl_writable, done_ev):
+    next_midnight = None
+
+    while not done_ev.wait(1):
+        # get time
+        now = datetime.datetime.today()
+
+        # setup the next expiration time (midnight tonight)
+        if next_midnight is None:
+            oneday = datetime.timedelta(1)
+            tomorrow = now + oneday
+            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)
+
+        # if we are past midnight, launch the rotate task
+        if (now - next_midnight).total_seconds() <= 0:
+            next_midnight = None
+            tgen_logpath = tgen_writable.rotate_file()
+            torctl_logpath = torctl_writable.rotate_file()
+            ## TODO make TorPerf Analysis object and and process the files
+            # put the output in the twistd docroot
+
 class Measurement(object):
 
     def __init__(self, tor_bin_path, tgen_bin_path, twistd_bin_path, datadir_path):
@@ -108,14 +148,20 @@ class Measurement(object):
             logging.info("Bootstrapping started...")
             logging.info("Log files for the client and server processes will be placed in {0}".format(self.datadir_path))
 
+            general_writables = []
+            tgen_client_writable, torctl_client_writable = None, None
+
             if do_onion or do_inet:
-                self.__start_tgen_server()
+                general_writables.append(self.__start_tgen_server())
 
             if do_onion:
-                self.__start_tor_server()
+                tor_writable, torctl_writable = self.__start_tor_server()
+                general_writables.append(tor_writable)
+                general_writables.append(torctl_writable)
 
             if do_onion or do_inet:
-                self.__start_tor_client()
+                tor_writable, torctl_client_writable = self.__start_tor_client()
+                general_writables.append(tor_writable)
 
             server_urls = []
             if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:58888".format(self.hs_service_id))
@@ -124,14 +170,17 @@ class Measurement(object):
             if do_onion or do_inet:
                 assert len(server_urls) > 0
 
-                tgen_client_logpath = self.__start_tgen_client(server_urls)
-                self.__start_twistd()
+                tgen_client_writable = self.__start_tgen_client(server_urls)
+                general_writables.append(self.__start_twistd())
+
+                self.__start_log_processors(general_writables, tgen_client_writable, torctl_client_writable)
 
                 logging.info("Bootstrapping finished, entering heartbeat loop")
                 time.sleep(1)
                 broken_count = 0
                 while True:
-                    logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count(tgen_client_logpath)))
+                    # TODO add status update of some kind? maybe the number of files in the twistd directory?
+                    # logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count(tgen_client_writable.filename)))
 
                     while broken_count < 60:
                         if self.__is_alive():
@@ -176,6 +225,18 @@ class Measurement(object):
             logging.info("Child process cleanup complete!")
             logging.info("Exiting")
 
+    def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
+        # rotate all log files that dont need special parsing
+        logrotate_args = (general_writables, self.done_event)
+        logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate_general", args=logrotate_args)
+        logrotate.start()
+        self.threads.append(logrotate)
+        # rotate the log files, and then parse out the torperf measurement data
+        logrotate_torperf_args = (tgen_writable, torctl_writable, self.done_event)
+        logrotate_torperf = threading.Thread(target=logrotate_parsetorperf_thread_task, name="logrotate_torperf", args=logrotate_torperf_args)
+        logrotate_torperf.start()
+        self.threads.append(logrotate_torperf)
+
     def __start_tgen_client(self, server_urls):
         return self.__start_tgen("client", 58889, 59001, server_urls)
 
@@ -206,7 +267,7 @@ class Measurement(object):
         tgen_watchdog.start()
         self.threads.append(tgen_watchdog)
 
-        return tgen_logpath
+        return tgen_writable
 
     def __start_twistd(self):
         logging.info("Starting Twistd server process...")
@@ -229,7 +290,7 @@ class Measurement(object):
         self.threads.append(twisted_watchdog)
         logging.info("twistd web server running at 0.0.0.0:{0}".format(50080))
 
-        return twisted_logpath
+        return twisted_writable
 
     def __start_tor_client(self):
         return self.__start_tor("client", 59051, 59001)
@@ -286,7 +347,7 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards
                 self.hs_control_port = control_port
                 logging.info("Ephemeral hidden service is available at {0}.onion".format(response.service_id))
 
-        return torctl_logpath
+        return tor_writable, torctl_writable
 
     def __generate_index(self, docroot_path):
         root = etree.Element("files")

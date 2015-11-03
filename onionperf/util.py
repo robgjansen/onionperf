@@ -6,6 +6,7 @@ Created on Oct 1, 2015
 
 import sys, os, socket, logging
 from subprocess import Popen, PIPE, STDOUT
+from threading import Lock
 from cStringIO import StringIO
 from abc import ABCMeta, abstractmethod
 import shutil, time
@@ -101,6 +102,7 @@ class FileWritable(Writable):
         self.file = None
         self.xzproc = None
         self.ddproc = None
+        self.lock = Lock()
 
         if self.filename == '-':
             self.file = sys.stdout
@@ -110,10 +112,17 @@ class FileWritable(Writable):
                 self.filename += ".xz"
 
     def write(self, msg):
-        if self.file is None: self.open()
+        self.lock.aquire()
+        if self.file is None: self.__open_nolock()
         if self.file is not None: self.file.write(msg)
+        self.lock.release()
 
     def open(self):
+        self.lock.aquire()
+        self.__open_nolock()
+        self.lock.release()
+
+    def __open_nolock(self):
         if self.do_compress:
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
             self.ddproc = Popen("dd of={0}".format(self.filename).split(), stdin=self.xzproc.stdout, stdout=open(os.devnull, 'w'), stderr=STDOUT)
@@ -121,20 +130,42 @@ class FileWritable(Writable):
         else:
             self.file = open(self.filename, 'a')
 
+    def close(self):
+        self.lock.aquire()
+        self.__close_nolock()
+        self.lock.release()
+
+    def __close_nolock(self):
+        if self.file is not None:
+            self.file.close()
+            self.file = None
+        if self.xzproc is not None:
+            self.xzproc.wait()
+            self.xzproc = None
+        if self.ddproc is not None:
+            self.ddproc.wait()
+            self.ddproc = None
+
     def rotate_file(self):
-        # # FIXME I dont think this will work if do_compress is True
+        self.lock.aquire()
+
+        # build up the new filename with an embedded timestamp
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
         ts = time.strftime("%Y-%m-%d_%H:%M:%S")
         new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
-        new_filename = self.filename.replace(base, new_base)
-        shutil.copy2(self.filename, new_filename)
-        self.file.truncate(0)
-        return new_filename
+        new_filename = self.filename.replace(base, "log_archive/{0}".format(new_base))
 
-    def close(self):
-        if self.file is not None:
-            self.file.close()
+        # close and move the old file, then open a new one at the original location
+        self.__close_nolock()
+        # shutil.copy2(self.filename, new_filename)
+        # self.file.truncate(0)
+        shutil.move(self.filename, new_filename)
+        self.__open_nolock()
+
+        self.lock.release()
+        # return new file name so it can be processed if desired
+        return new_filename
 
 class MemoryWritable(Writable):
 

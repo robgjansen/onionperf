@@ -148,7 +148,7 @@ class TorPerfAnalysis(Analysis):
 
     @property
     def default_filename(self):
-        return "stats.torperf.csv"
+        return "stats.torperf.json"
 
     def new_parser(self, source):
         return TorPerfParser(source)
