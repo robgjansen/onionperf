@@ -8,7 +8,15 @@ import os, subprocess, threading, Queue, logging, time, datetime, re, shlex
 import stem, stem.process, stem.version, stem.util.str_tools
 from lxml import etree
 
-import monitor, model, util
+import analysis, monitor, model, util
+
+def generate_docroot_index(docroot_path):
+    root = etree.Element("files")
+    filepaths = [f for f in os.listdir(docroot_path) if os.path.isfile(os.path.abspath('/'.join([docroot_path, f])))]
+    for filename in filepaths:
+        e = etree.SubElement(root, "file")
+        e.set("name", filename)
+    with open("{0}/index.xml".format(docroot_path), 'wb') as f: print >> f, etree.tostring(root, pretty_print=True, xml_declaration=True)
 
 def readline_thread_task(instream, q):
     # wait for lines from stdout until the EOF
@@ -77,7 +85,7 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
     # master asked us to stop, close the writable before exiting thread
     writable.close()
 
-def logrotate_thread_task(writables, done_ev):
+def logrotate_thread_task(writables, parse_torperf, docroot, done_ev):
     next_midnight = None
 
     while not done_ev.wait(1):
@@ -88,34 +96,23 @@ def logrotate_thread_task(writables, done_ev):
         if next_midnight is None:
             oneday = datetime.timedelta(1)
             tomorrow = now + oneday
-            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)
+            hr, min, sec = 0, 0, 0
+            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, hr, min, sec)
 
         # if we are past midnight, launch the rotate task
-        if (now - next_midnight).total_seconds() >= 0:
+        if (next_midnight - now).total_seconds() < 0:
             next_midnight = None
-            for w in writables:
-                w.rotate_file()
+            filepaths = [w.rotate_file() for w in writables]
+            if parse_torperf:
+                # process the files to compute torperf results
+                sources = [util.DataSource(filepath) for filepath in filepaths]
+                parser = analysis.TorPerfParser(sources)
+                parser.parse()
 
-def logrotate_parsetorperf_thread_task(tgen_writable, torctl_writable, done_ev):
-    next_midnight = None
-
-    while not done_ev.wait(1):
-        # get time
-        now = datetime.datetime.today()
-
-        # setup the next expiration time (midnight tonight)
-        if next_midnight is None:
-            oneday = datetime.timedelta(1)
-            tomorrow = now + oneday
-            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)
-
-        # if we are past midnight, launch the rotate task
-        if (now - next_midnight).total_seconds() <= 0:
-            next_midnight = None
-            tgen_logpath = tgen_writable.rotate_file()
-            torctl_logpath = torctl_writable.rotate_file()
-            ## TODO make TorPerf Analysis object and and process the files
-            # put the output in the twistd docroot
+                # put the output in the twistd docroot
+                parser.export_torperf_files(output_prefix=docroot, compress=False)
+                # update the xml index
+                generate_docroot_index(docroot)
 
 class Measurement(object):
 
@@ -127,6 +124,7 @@ class Measurement(object):
         self.threads = None
         self.done_event = None
         self.hs_service_id = None
+        self.twisted_docroot = None
 
     def run(self, do_onion=True, do_inet=True):
         self.threads = []
@@ -138,7 +136,7 @@ class Measurement(object):
             if do_onion:
                 try:
                     tor_version = stem.version.get_system_tor_version(self.tor_bin_path)
-                    if tor_version < stem.version.Requirement.ADD_ONION:
+                    if tor_version < stem.version.Requirement.ADD_ONION:  # ADD_ONION is a stem 1.4.0 feature
                         logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, you have {0}, aborting".format(tor_version))
                         return
                 except:
@@ -227,13 +225,13 @@ class Measurement(object):
 
     def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
         # rotate all log files that dont need special parsing
-        logrotate_args = (general_writables, self.done_event)
+        logrotate_args = (general_writables, False, self.done_event)
         logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate_general", args=logrotate_args)
         logrotate.start()
         self.threads.append(logrotate)
         # rotate the log files, and then parse out the torperf measurement data
-        logrotate_torperf_args = (tgen_writable, torctl_writable, self.done_event)
-        logrotate_torperf = threading.Thread(target=logrotate_parsetorperf_thread_task, name="logrotate_torperf", args=logrotate_torperf_args)
+        logrotate_torperf_args = ([tgen_writable, torctl_writable], True, self.twisted_docroot, self.done_event)
+        logrotate_torperf = threading.Thread(target=logrotate_thread_task, name="logrotate_torperf", args=logrotate_torperf_args)
         logrotate_torperf.start()
         self.threads.append(logrotate_torperf)
 
@@ -281,7 +279,8 @@ class Measurement(object):
 
         twisted_docroot = "{0}/docroot".format(twisted_datadir)
         if not os.path.exists(twisted_docroot): os.makedirs(twisted_docroot)
-        self.__generate_index(twisted_docroot)
+        generate_docroot_index(twisted_docroot)
+        self.twisted_docroot = twisted_docroot
 
         twisted_cmd = "{0} -n -l - web --port 50080 --path {1}".format(self.twistd_bin_path, twisted_docroot)
         twisted_args = (twisted_cmd, twisted_datadir, twisted_writable, self.done_event, None, None, None)
@@ -348,14 +347,6 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards
                 logging.info("Ephemeral hidden service is available at {0}.onion".format(response.service_id))
 
         return tor_writable, torctl_writable
-
-    def __generate_index(self, docroot_path):
-        root = etree.Element("files")
-        filepaths = [f for f in os.listdir(docroot_path) if os.path.isfile(os.path.abspath('/'.join([docroot_path, f])))]
-        for filename in filepaths:
-            e = etree.SubElement(root, "file")
-            e.set("name", filename)
-        with open("{0}/index.xml".format(docroot_path), 'wb') as f: print >> f, etree.tostring(root, pretty_print=True, xml_declaration=True)
 
     def __get_download_count(self, tgen_logpath):
         count = 0

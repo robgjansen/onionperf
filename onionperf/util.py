@@ -66,22 +66,38 @@ class DataSource(object):
         self.source = None
         self.xzproc = None
 
-    def open(self):
-        if self.filename == '-':
-            self.source = sys.stdin
-        elif self.compress or self.filename.endswith(".xz"):
-            cmd = "xz --decompress --stdout {0}".format(self.filename)
-            xzproc = Popen(cmd.split(), stdout=PIPE)
-            self.source = xzproc.stdout
-        else:
-            self.source = open(self.filename, 'r')
+    def __iter__(self):
+        if self.source is None:
+            self.open()
+        return self.source
 
-    def get(self):
+    def next(self):
+        return self.__next__()
+
+    def __next__(self):  # python 3
+        return self.source.next() if self.source is not None else None
+
+    def open(self):
+        if self.source is None:
+            if self.filename == '-':
+                self.source = sys.stdin
+            elif self.compress or self.filename.endswith(".xz"):
+                self.compress = True
+                cmd = "xz --decompress --stdout {0}".format(self.filename)
+                xzproc = Popen(cmd.split(), stdout=PIPE)
+                self.source = xzproc.stdout
+            else:
+                self.source = open(self.filename, 'r')
+
+    def get_file_handle(self):
+        if self.source is None:
+            self.open()
         return self.source
 
     def close(self):
         if self.source is not None: self.source.close()
         if self.xzproc is not None: self.xzproc.wait()
+
 
 class Writable(object):
     __metaclass__ = ABCMeta
@@ -112,13 +128,13 @@ class FileWritable(Writable):
                 self.filename += ".xz"
 
     def write(self, msg):
-        self.lock.aquire()
+        self.lock.acquire()
         if self.file is None: self.__open_nolock()
         if self.file is not None: self.file.write(msg)
         self.lock.release()
 
     def open(self):
-        self.lock.aquire()
+        self.lock.acquire()
         self.__open_nolock()
         self.lock.release()
 
@@ -131,7 +147,7 @@ class FileWritable(Writable):
             self.file = open(self.filename, 'a')
 
     def close(self):
-        self.lock.aquire()
+        self.lock.acquire()
         self.__close_nolock()
         self.lock.release()
 
@@ -147,7 +163,7 @@ class FileWritable(Writable):
             self.ddproc = None
 
     def rotate_file(self):
-        self.lock.aquire()
+        self.lock.acquire()
 
         # build up the new filename with an embedded timestamp
         base = os.path.basename(self.filename)
