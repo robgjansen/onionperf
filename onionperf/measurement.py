@@ -225,7 +225,7 @@ class Measurement(object):
 
     def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
         # rotate all log files that dont need special parsing
-        logrotate_args = (general_writables, False, self.done_event)
+        logrotate_args = (general_writables, False, None, self.done_event)
         logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate_general", args=logrotate_args)
         logrotate.start()
         self.threads.append(logrotate)
