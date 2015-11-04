@@ -207,9 +207,11 @@ class Measurement(object):
             logging.info("Cleaning up child processes now...")
 
             if self.hs_service_id is not None:
-                with stem.control.Controller.from_port(port=self.hs_control_port) as torctl:
-                    torctl.authenticate()
-                    torctl.remove_ephemeral_hidden_service(self.hs_service_id)
+                try:
+                    with stem.control.Controller.from_port(port=self.hs_control_port) as torctl:
+                        torctl.authenticate()
+                        torctl.remove_ephemeral_hidden_service(self.hs_service_id)
+                except: pass # this fails to authenticate if tor proc is dead
 
 #            logging.disable(logging.INFO)
             self.done_event.set()
