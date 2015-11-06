@@ -172,6 +172,8 @@ class FileWritable(Writable):
         new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
         new_filename = self.filename.replace(base, "log_archive/{0}".format(new_base))
 
+        make_path(os.path.dirname(new_filename))
+
         # close and move the old file, then open a new one at the original location
         self.__close_nolock()
         # shutil.copy2(self.filename, new_filename)

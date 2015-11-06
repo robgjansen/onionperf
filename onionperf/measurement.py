@@ -104,15 +104,18 @@ def logrotate_thread_task(writables, parse_torperf, docroot, done_ev):
             next_midnight = None
             filepaths = [w.rotate_file() for w in writables]
             if parse_torperf:
-                # process the files to compute torperf results
-                sources = [util.DataSource(filepath) for filepath in filepaths]
-                parser = analysis.TorPerfParser(sources)
-                parser.parse()
+                try:
+                    # process the files to compute torperf results
+                    sources = [util.DataSource(filepath) for filepath in filepaths]
+                    parser = analysis.TorPerfParser(sources)
+                    parser.parse()
 
-                # put the output in the twistd docroot
-                parser.export_torperf_files(output_prefix=docroot, compress=False)
-                # update the xml index
-                generate_docroot_index(docroot)
+                    # put the output in the twistd docroot
+                    parser.export_torperf_files(output_prefix=docroot, compress=False)
+                    # update the xml index
+                    generate_docroot_index(docroot)
+                except Exception as e:
+                    logging.warning("Caught and ignored exception in TorPerf log parser: {0}".format(repr(e)))
 
 class Measurement(object):
 
@@ -211,7 +214,7 @@ class Measurement(object):
                     with stem.control.Controller.from_port(port=self.hs_control_port) as torctl:
                         torctl.authenticate()
                         torctl.remove_ephemeral_hidden_service(self.hs_service_id)
-                except: pass # this fails to authenticate if tor proc is dead
+                except: pass  # this fails to authenticate if tor proc is dead
 
 #            logging.disable(logging.INFO)
             self.done_event.set()
