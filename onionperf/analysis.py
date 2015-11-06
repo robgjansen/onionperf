@@ -345,6 +345,8 @@ class TorPerfEntry(object):
             self.data[key] = value
 
     def to_torperf_string(self):
+        self.data['ENDPOINT-LOCAL'] = self.local_proxy_str
+        self.data['ENDPOINT-REMOTE'] = self.remote_server_str
         return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
 
     def assert_order(self):
