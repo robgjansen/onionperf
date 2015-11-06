@@ -85,7 +85,7 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
     # master asked us to stop, close the writable before exiting thread
     writable.close()
 
-def logrotate_thread_task(writables, parse_torperf, docroot, done_ev):
+def logrotate_thread_task(writables, parse_torperf, docroot, nickname, done_ev):
     next_midnight = None
 
     while not done_ev.wait(1):
@@ -107,7 +107,7 @@ def logrotate_thread_task(writables, parse_torperf, docroot, done_ev):
                 try:
                     # process the files to compute torperf results
                     sources = [util.DataSource(filepath) for filepath in filepaths]
-                    parser = analysis.TorPerfParser(sources)
+                    parser = analysis.TorPerfParser(sources, name=nickname)
                     parser.parse()
 
                     # put the output in the twistd docroot
@@ -119,11 +119,12 @@ def logrotate_thread_task(writables, parse_torperf, docroot, done_ev):
 
 class Measurement(object):
 
-    def __init__(self, tor_bin_path, tgen_bin_path, twistd_bin_path, datadir_path):
+    def __init__(self, tor_bin_path, tgen_bin_path, twistd_bin_path, datadir_path, nickname):
         self.tor_bin_path = tor_bin_path
         self.tgen_bin_path = tgen_bin_path
         self.twistd_bin_path = twistd_bin_path
         self.datadir_path = datadir_path
+        self.nickname = nickname
         self.threads = None
         self.done_event = None
         self.hs_service_id = None
@@ -230,12 +231,12 @@ class Measurement(object):
 
     def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
         # rotate all log files that dont need special parsing
-        logrotate_args = (general_writables, False, None, self.done_event)
+        logrotate_args = (general_writables, False, None, self.nickname, self.done_event)
         logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate_general", args=logrotate_args)
         logrotate.start()
         self.threads.append(logrotate)
         # rotate the log files, and then parse out the torperf measurement data
-        logrotate_torperf_args = ([tgen_writable, torctl_writable], True, self.twisted_docroot, self.done_event)
+        logrotate_torperf_args = ([tgen_writable, torctl_writable], True, self.twisted_docroot, self.nickname, self.done_event)
         logrotate_torperf = threading.Thread(target=logrotate_thread_task, name="logrotate_torperf", args=logrotate_torperf_args)
         logrotate_torperf.start()
         self.threads.append(logrotate_torperf)
