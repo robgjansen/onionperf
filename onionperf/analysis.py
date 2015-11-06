@@ -7,12 +7,13 @@ Created on Oct 1, 2015
 from abc import ABCMeta, abstractmethod, abstractproperty
 from __builtin__ import classmethod
 
-import sys, os, re, json
+import sys, os, re, json, datetime
 from multiprocessing import Pool, cpu_count
 from signal import signal, SIGINT, SIG_IGN
 
 from stem.response import ControlMessage, convert
 import util
+from socket import gethostname
 
 def analyze_subproc_func(parser):
     signal(SIGINT, SIG_IGN)  # ignore interrupts
@@ -310,31 +311,143 @@ class TorParser(Parser):
         print >> sys.stderr, "done merging results: {0} boot success count, {1} boot error count, {2} files with names, {3} files without names, {4} total bytes read, {5} total bytes written".format(success_count, error_count, name_count, noname_count, total_read, total_write)
         return d
 
+class TorPerfEntry(object):
+    def __init__(self, tid, local_proxy_str, remote_server_str, filesize):
+        self.id = tid
+        self.local_proxy_str = local_proxy_str
+        self.remote_server_str = remote_server_str
+        self.data = {}
+        # https://collector.torproject.org/#type-torperf
+        # TODO make this an enum
+        for key in ['LAUNCH', 'START', 'SOCKET', 'CONNECT', 'NEGOTIATE', \
+                  'REQUEST', 'RESPONSE', 'DATAREQUEST', 'DATARESPONSE', \
+                  'DATAPERC10', 'DATAPERC20', 'DATAPERC30', 'DATAPERC40', 'DATAPERC50', \
+                  'DATAPERC60', 'DATAPERC70', 'DATAPERC80', 'DATAPERC90', 'DATACOMPLETE', \
+                  'SOURCE', 'FILESIZE', 'READBYTES', 'WRITEBYTES', \
+                  'PATH', 'BUILDTIMES', 'QUANTILE', 'TIMEOUT', \
+                  'CIRC_ID', 'USED_AT', 'USED_BY', 'DIDTIMEOUT']:
+            self.data[key] = None  # initialize known keys
+        self.set('FILESIZE', filesize)
+        self.last_bytes = 0
+
+    def update_progress(self, time, numbytes):
+        if numbytes > self.last_bytes:
+            self.last_bytes = numbytes
+            frac = float(self.last_bytes) / float(self.data['FILESIZE'])
+            perc = frac * 100.0
+            for i in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
+                k = 'DATAPERC{0}'.format(i)
+                if int(perc) >= i and self.data[k] is None:
+                    self.set(k, "{0:.2f}".format(time))
+
+    def set(self, key, value):
+        if key in self.data:
+            self.data[key] = value
+
+    def to_torperf_string(self):
+        return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
+
+    def assert_order(self):
+        keys_in_order = ['START', 'SOCKET', 'CONNECT', 'NEGOTIATE', 'REQUEST', 'RESPONSE', \
+             'DATAREQUEST', 'DATARESPONSE', 'DATAPERC10', 'DATAPERC20', 'DATAPERC30', 'DATAPERC40', \
+             'DATAPERC50', 'DATAPERC60', 'DATAPERC70', 'DATAPERC80', 'DATAPERC90', 'DATACOMPLETE']
+        prev_ts = 0.0
+        for k in keys_in_order:
+            ts = float(self.data[k])
+            assert ts >= prev_ts, "{0} timestamp {1} is less than previous stamp {2} for entry {3}".format(k, ts, prev_ts, self.id)
+            prev_ts = ts
+
 class TorPerfParser(Parser):
 
-    def __init__(self, sources):
+    def __init__(self, sources, name=None):
         self.sources = sources
-        self.name = None
+        self.name = name
         self.boot_succeeded = False
-        self.data = {}  # {numbytes: [{BUILDTIMES:[0.2,0.3,0.6], CIRC_ID:2532, CONNECT:1446336481.93, etc}, ...]
+        self.transfers = {}
+        self.sizes = {}
+        self.first_complete_dt = datetime.datetime.today()
 
     def parse(self):
         for s in self.sources:
             s.open()
             for line in s:
-                if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
-                    self.name = line.strip().split()[11]
-                if not self.boot_succeeded:
-                    if re.search("Bootstrapped\s100", line) is not None:
-                        self.boot_succeeded = True
-                ## TODO parse out torperf stats
                 try:
-                    if re.search("\s650\s", line) is not None:
+                    if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
+                        self.name = line.strip().split()[11].split('.')[0]
+
+                    if not self.boot_succeeded:
+                        if re.search("Bootstrapped\s100", line) is not None:
+                            self.boot_succeeded = True
+
+                    # parse out torperf stats
+                    is_new, is_status, is_complete, is_torctlmsg = False, False, False, False
+                    if re.search("state\sCOMMAND\sto\sstate\sRESPONSE", line) is not None: is_new = True
+                    elif re.search("transfer-status", line) is not None: is_status = True
+                    elif re.search("transfer-complete", line) is not None: is_complete = True
+                    elif re.search("\s650\s", line) is not None: is_torctlmsg = True
+
+                    if is_new:
+                        # another run of tgen starts the id over counting up from 1
+                        # if a prev transfer with the same id did not complete, we can be sure it never will
+                        tid = int(line.strip().split()[7].strip('()').split('-')[0])
+                        if tid in self.transfers: self.transfers.pop(tid)
+
+                    if is_status or is_complete:
+                        parts = line.strip().split()
+                        unix_ts, transport, transfer, status = float(parts[2]), parts[8], parts[10], parts[13]
+                        downloaded, filesize = [int(i) for i in status.split('=')[1].split('/')]
+
+                        transfer_parts = transfer.strip('()').split('-')
+                        tid = int(transfer_parts[0])
+
+                        # create if needed
+                        if tid not in self.transfers:
+                            transport_parts = transport.strip('()').split('-')
+                            self.transfers[tid] = TorPerfEntry(tid, transport_parts[2], transport_parts[3], filesize)
+
+                        # stats to add during download
+                        self.transfers[tid].update_progress(unix_ts, downloaded)
+
+                        # stats to add when finished
+                        if is_complete:
+                            total_read, total_write = int(parts[11].split('=')[1]), int(parts[12].split('=')[1])
+                            self.transfers[tid].set('READBYTES', total_read)
+                            self.transfers[tid].set('WRITEBYTES', total_write)
+
+                            def keyval_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000.0
+                            def ts_to_str(ts): return"{0:.02f}".format(ts)
+
+                            s_to_cksum = keyval_to_secs(parts[25])
+                            start_ts = unix_ts - s_to_cksum
+
+                            self.transfers[tid].set('START', ts_to_str(start_ts))
+                            self.transfers[tid].set('SOCKET', ts_to_str(start_ts + keyval_to_secs(parts[15])))
+                            self.transfers[tid].set('CONNECT', ts_to_str(start_ts + keyval_to_secs(parts[16])))
+                            self.transfers[tid].set('NEGOTIATE', ts_to_str(start_ts + keyval_to_secs(parts[18])))
+                            self.transfers[tid].set('REQUEST', ts_to_str(start_ts + keyval_to_secs(parts[19])))
+                            self.transfers[tid].set('RESPONSE', ts_to_str(start_ts + keyval_to_secs(parts[20])))
+                            self.transfers[tid].set('DATAREQUEST', ts_to_str(start_ts + keyval_to_secs(parts[21])))
+                            self.transfers[tid].set('DATARESPONSE', ts_to_str(start_ts + keyval_to_secs(parts[22])))
+                            self.transfers[tid].set('DATACOMPLETE', ts_to_str(unix_ts))
+
+                            if len(self.sizes) == 0: self.first_complete_dt = datetime.datetime.fromtimestamp(unix_ts)
+                            if filesize not in self.sizes: self.sizes[filesize] = []
+
+                            # make sure the timestamps are in order, if not, we catch the error
+                            # and wont add this entry to the completed downloads
+                            self.transfers[tid].assert_order()
+                            self.sizes[filesize].append(self.transfers[tid])
+                            self.transfers.pop(tid)
+
+                    if is_torctlmsg:
+                        # parse with stem
                         raw_event_str = line[line.index("650 "):]
-                        msg = ControlMessage.from_str(raw_event_str)
-                        convert('EVENT', msg)
-                        # do something with msg
-                except: continue # probably a line overwrite error
+                        # msg = ControlMessage.from_str(raw_event_str)
+                        # convert('EVENT', msg)
+
+                        # do something with the new ControlMessage object
+                except:
+                    continue  # probably a line overwrite error
             s.close()
 
     def merge(self, parsers):
@@ -344,23 +457,20 @@ class TorPerfParser(Parser):
     def export_torperf_files(self, output_prefix=os.getcwd(), compress=True):
         if not os.path.exists(output_prefix): os.makedirs(output_prefix)
 
-        self.data = {5242880: [{'BUILDTIMES':"0.2,0.3,0.6", 'CIRC_ID':2532, 'CONNECT':1446336481.93}, {'BUILDTIMES':"0.2,0.3,0.6", 'CIRC_ID':2532, 'CONNECT':1446336481.93}], 1024: [{'CIRC_ID':0}]}
-        datestr = "2015-00-00"
+        if self.name is None: self.name = gethostname().split('.')[0]
 
-        for size_bytes in self.data:
-            l = self.data[size_bytes]
+        d = self.first_complete_dt
+        datestr = "{0}-{1}-{2}".format(d.year, d.month, d.day) if d is not None else "0000-00-00"
+
+        for size_bytes in self.sizes:
+            l = self.sizes[size_bytes]
             filepath = "{0}/onionperf-{1}-{2}.tpf".format(output_prefix, size_bytes, datestr)
+            should_append = os.path.exists(filepath) and not compress
             output = util.FileWritable(filepath, do_compress=compress)
             output.open()
-            output.write("@type torperf 1.0\n")
-            for dl in l:
-                s = ' '.join("{0}={1}".format(k, dl[k]) for k in sorted(dl.keys()))
-                output.write("{0}\n".format(s))
+            if not should_append: output.write("@type torperf 1.0\r\n")
+            for entry in l:
+                entry.set('SOURCE', self.name)
+                output.write("{0}\r\n".format(entry.to_torperf_string()))
             output.close()
-'''
-from stem.response import ControlMessage, convert
 
-msg = ControlMessage.from_str("650 BW 1532 2656\r\n")
-convert('EVENT', msg)
-print msg
-'''
