@@ -7,7 +7,7 @@ Created on Oct 1, 2015
 from abc import ABCMeta, abstractmethod, abstractproperty
 from __builtin__ import classmethod
 
-import sys, os, re, json, datetime
+import sys, os, re, json, datetime, logging
 from multiprocessing import Pool, cpu_count
 from signal import signal, SIGINT, SIG_IGN
 
@@ -61,8 +61,8 @@ class Analysis(object):
     # this is useful when different nodes create their own log files, and we want to process them
     # all in parallel
     def analyze_directory(self, search_path, search_expressions, num_subprocs=1):
-        logfilepaths = Analysis.__find_file_paths(search_path, search_expressions)
-        print >> sys.stderr, "processing input from {0} files...".format(len(logfilepaths))
+        logfilepaths = Analysis.find_file_paths(search_path, search_expressions)
+        logging.info("processing input from {0} files...".format(len(logfilepaths)))
 
         if num_subprocs <= 0: num_subprocs = cpu_count()
         pool = Pool(num_subprocs)
@@ -73,7 +73,7 @@ class Analysis(object):
             while not mr.ready(): mr.wait(1)
             parsers = mr.get()
         except KeyboardInterrupt:
-            print >> sys.stderr, "interrupted, terminating process pool"
+            logging.info("interrupted, terminating process pool")
             pool.terminate()
             pool.join()
             sys.exit()
@@ -83,7 +83,7 @@ class Analysis(object):
             self.result = parser.merge(parsers)
 
     @classmethod
-    def __find_file_paths(cls, searchpath, patterns):
+    def find_file_paths(cls, searchpath, patterns):
         paths = []
         if searchpath.endswith("/-"): paths.append("-")
         else:
@@ -99,10 +99,10 @@ class Analysis(object):
 
     def dump_to_file(self, filename, output_prefix=os.getcwd(), compress=True):
         if self.result == None:
-            print >> sys.stderr, "we have no analysis results to dump!"
+            logging.warning("we have no analysis results to dump!")
             return
 
-        print >> sys.stderr, "dumping stats in {0}".format(output_prefix)
+        logging.info("dumping stats in {0}".format(output_prefix))
 
         if not os.path.exists(output_prefix): os.makedirs(output_prefix)
         filepath = "{0}/{1}".format(output_prefix, filename)
@@ -112,7 +112,7 @@ class Analysis(object):
         json.dump(self.result, output.file, sort_keys=True, separators=(',', ': '), indent=2)
         output.close()
 
-        print >> sys.stderr, "all done dumping stats to {0}".format(output.filename)
+        logging.info("all done dumping stats to {0}".format(output.filename))
 
     @classmethod
     def from_file(cls, input_prefix=os.getcwd(), filename=None):
@@ -123,12 +123,12 @@ class Analysis(object):
         logpath = os.path.abspath(os.path.expanduser("{0}/{1}".format(input_prefix, filename)))
 
         if not os.path.exists(logpath):
-            print >> sys.stderr, "unable to load analysis results from log file at '{0}'".format(logpath)
+            logging.warning("unable to load analysis results from log file at '{0}'".format(logpath))
             if not logpath.endswith(".xz"):
                 logpath += ".xz"
                 print >> sys.stderr, "trying '{0}'".format(logpath)
                 if not os.path.exists(logpath):
-                    print >> sys.stderr, "unable to load analysis results from log file at '{0}'".format(logpath)
+                    logging.warning("unable to load analysis results from log file at '{0}'".format(logpath))
                     return None
 
         s = util.DataSource(logpath)
@@ -225,7 +225,7 @@ class TGenParser(Parser):
         name_count, noname_count, success_count, error_count = 0, 0, 0, 0
 
         parsers.append(self)
-        print >> sys.stderr, "merging {0} parsed results now...".format(len(parsers))
+        logging.info("merging {0} parsed results now...".format(len(parsers)))
 
         for parser in parsers:
             if parser is None:
@@ -238,7 +238,7 @@ class TGenParser(Parser):
             success_count += parser.num_successes
             error_count += parser.num_errors
 
-        print >> sys.stderr, "done merging results: {0} total successes, {1} total errors, {2} files with names, {3} files without names".format(success_count, error_count, name_count, noname_count)
+        logging.info("done merging results: {0} total successes, {1} total errors, {2} files with names, {3} files without names".format(success_count, error_count, name_count, noname_count))
         return d
 
 class TorParser(Parser):
@@ -265,13 +265,15 @@ class TorParser(Parser):
                         self.name = parts[10]
                     if re.search("Bootstrapped\s100", line) is not None:
                         self.boot_succeeded = True
+                    elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
+                        self.boot_succeeded = True
                 elif re.search("\s650\sBW\s", line) is not None:
                     parts = line.strip().split()
-                    if len(parts) < 11: continue
-                    if 'Outbound' in line: print line
+                    if len(parts) < 7: continue
+                    if 'Outbound' in line: print line  # # XXX wtf is this here for?
                     second = int(float(parts[2]))
-                    bwr = int(parts[9])
-                    bww = int(parts[10])
+                    bwr = int(parts[5])
+                    bww = int(parts[6])
 
                     if second not in self.data['bytes_read']: self.data['bytes_read'][second] = 0
                     self.data['bytes_read'][second] += bwr
@@ -280,14 +282,13 @@ class TorParser(Parser):
                     self.data['bytes_written'][second] += bww
                     self.total_write += bww
             s.close()
-        self.source.open()
 
     def merge(self, parsers):
         d = {'nodes':{}}
         name_count, noname_count, success_count, error_count, total_read, total_write = 0, 0, 0, 0, 0, 0
 
         parsers.append(self)
-        print >> sys.stderr, "merging {0} parsed results now...".format(len(parsers))
+        logging.info("merging {0} parsed results now...".format(len(parsers)))
 
         for parser in parsers:
             if parser is None:
@@ -303,14 +304,14 @@ class TorParser(Parser):
                 success_count += 1
             else:
                 error_count += 1
-                print >> sys.stderr, "warning: tor running on host '{0}' did not fully bootstrap".format(parser.name)
+                logging.warning("tor running on host '{0}' did not fully bootstrap".format(parser.name))
                 continue
 
             d['nodes'][parser.name] = parser.data
             total_read += parser.total_read
             total_write += parser.total_write
 
-        print >> sys.stderr, "done merging results: {0} boot success count, {1} boot error count, {2} files with names, {3} files without names, {4} total bytes read, {5} total bytes written".format(success_count, error_count, name_count, noname_count, total_read, total_write)
+        logging.info("done merging results: {0} boot success count, {1} boot error count, {2} files with names, {3} files without names, {4} total bytes read, {5} total bytes written".format(success_count, error_count, name_count, noname_count, total_read, total_write))
         return d
 
 class TorPerfEntry(object):
@@ -385,6 +386,8 @@ class TorPerfParser(Parser):
 
                     if not self.boot_succeeded:
                         if re.search("Bootstrapped\s100", line) is not None:
+                            self.boot_succeeded = True
+                        elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
                             self.boot_succeeded = True
 
                     # parse out torperf stats

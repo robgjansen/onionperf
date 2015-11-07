@@ -257,7 +257,7 @@ class Measurement(object):
         if os.path.exists(tgen_confpath): os.remove(tgen_confpath)
         if socks_port is None:
             model.ListenModel(tgen_port="{0}".format(tgen_port)).dump_to_file(tgen_confpath)
-            logging.info("tgen server running at 0.0.0.0:{0}".format(tgen_port))
+            logging.info("TGen server running at 0.0.0.0:{0}".format(tgen_port))
         else:
             model.TorperfModel(tgen_port="{0}".format(tgen_port), tgen_servers=server_urls, socksproxy="127.0.0.1:{0}".format(socks_port)).dump_to_file(tgen_confpath)
 
@@ -293,7 +293,7 @@ class Measurement(object):
         twisted_watchdog = threading.Thread(target=watchdog_thread_task, name="twistd_watchdog", args=twisted_args)
         twisted_watchdog.start()
         self.threads.append(twisted_watchdog)
-        logging.info("twistd web server running at 0.0.0.0:{0}".format(50080))
+        logging.info("Twistd web server running at 0.0.0.0:{0}".format(50080))
 
         return twisted_writable
 
