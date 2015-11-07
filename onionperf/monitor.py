@@ -8,6 +8,7 @@ import datetime, stem
 from time import sleep
 from functools import partial
 from stem.control import EventType, Controller
+from socket import gethostname
 
 def get_supported_torctl_events():
     return list(EventType)
