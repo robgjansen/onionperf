@@ -90,7 +90,7 @@ def logrotate_thread_task(writables, parse_torperf, docroot, nickname, done_ev):
 
     while not done_ev.wait(1):
         # get time
-        now = datetime.datetime.today()
+        now = datetime.datetime.utcnow()
 
         # setup the next expiration time (midnight tonight)
         if next_midnight is None:
@@ -288,7 +288,7 @@ class Measurement(object):
         generate_docroot_index(twisted_docroot)
         self.twisted_docroot = twisted_docroot
 
-        twisted_cmd = "{0} -n -l - web --port 50080 --path {1}".format(self.twistd_bin_path, twisted_docroot)
+        twisted_cmd = "{0} -n -l - web --port 50080 --path {1} --mime-type=None".format(self.twistd_bin_path, twisted_docroot)
         twisted_args = (twisted_cmd, twisted_datadir, twisted_writable, self.done_event, None, None, None)
         twisted_watchdog = threading.Thread(target=watchdog_thread_task, name="twistd_watchdog", args=twisted_args)
         twisted_watchdog.start()

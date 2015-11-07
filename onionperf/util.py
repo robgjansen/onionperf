@@ -9,7 +9,7 @@ from subprocess import Popen, PIPE, STDOUT
 from threading import Lock
 from cStringIO import StringIO
 from abc import ABCMeta, abstractmethod
-import shutil, time
+import shutil, datetime
 
 def make_path(path):
     p = os.path.abspath(os.path.expanduser(path))
@@ -143,8 +143,8 @@ class FileWritable(Writable):
         if self.do_compress:
             self.xzproc = Popen("xz --threads=3 -".split(), stdin=PIPE, stdout=PIPE)
             dd_cmd = "dd of={0}".format(self.filename)
-            ## note: its probably not a good idea to append to finalized compressed files
-            #if not self.do_truncate: dd_cmd += " oflag=append conv=notrunc"
+            # # note: its probably not a good idea to append to finalized compressed files
+            # if not self.do_truncate: dd_cmd += " oflag=append conv=notrunc"
             self.ddproc = Popen(dd_cmd.split(), stdin=self.xzproc.stdout, stdout=open(os.devnull, 'w'), stderr=STDOUT)
             self.file = self.xzproc.stdin
         else:
@@ -172,7 +172,7 @@ class FileWritable(Writable):
         # build up the new filename with an embedded timestamp
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
-        ts = time.strftime("%Y-%m-%d_%H:%M:%S")
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H:%M:%S")
         new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
         new_filename = self.filename.replace(base, "log_archive/{0}".format(new_base))
 

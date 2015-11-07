@@ -4,7 +4,8 @@ Created on Oct 10, 2015
 @author: rob
 '''
 
-import time, stem
+import datetime, stem
+from time import sleep
 from functools import partial
 from stem.control import EventType, Controller
 
@@ -41,7 +42,7 @@ class TorMonitor(object):
                     #    with open(self.filepath, 'rb') as sizef:
                     #        msg = "tor-ctl-logger[port={0}] logged {1} bytes to {2}, press CTRL-C to quit".format(self.tor_ctl_port, os.fstat(sizef.fileno()).st_size, self.filepath)
                     #        logging.info(msg)
-                    time.sleep(1)
+                    sleep(1)
             except KeyboardInterrupt:
                 pass  # the user hit ctrl+c
 
@@ -51,9 +52,11 @@ class TorMonitor(object):
         self.__log(writable, event.raw_content())
 
     def __log(self, writable, msg):
-        s = time.time()
-        # t = time.localtime(s)
-        writable.write("{0} {1:.02f} {2}".format(time.strftime("%Y-%m-%d %H:%M:%S"), s, msg))
+        now = datetime.datetime.now()
+        utcnow = datetime.datetime.utcnow()
+        epoch = datetime.datetime(1970, 1, 1)
+        unix_ts = (utcnow - epoch).total_seconds()
+        writable.write("{0} {1:.02f} {2}".format(now.strftime("%Y-%m-%d %H:%M:%S"), unix_ts, msg))
 
 def tor_monitor_run(tor_ctl_port, writable, events, done_ev):
     torctl_monitor = TorMonitor(tor_ctl_port, writable, events)

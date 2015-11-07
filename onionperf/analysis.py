@@ -349,14 +349,14 @@ class TorPerfEntry(object):
         self.data['ENDPOINT-REMOTE'] = self.remote_server_str
         return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
 
-    def assert_order(self):
+    def assert_monotonic_order(self):
         keys_in_order = ['START', 'SOCKET', 'CONNECT', 'NEGOTIATE', 'REQUEST', 'RESPONSE', \
              'DATAREQUEST', 'DATARESPONSE', 'DATAPERC10', 'DATAPERC20', 'DATAPERC30', 'DATAPERC40', \
              'DATAPERC50', 'DATAPERC60', 'DATAPERC70', 'DATAPERC80', 'DATAPERC90', 'DATACOMPLETE']
         prev_ts = 0.0
         for k in keys_in_order:
             ts = float(self.data[k])
-            assert ts >= prev_ts, "{0} timestamp {1} is less than previous stamp {2} for entry {3}".format(k, ts, prev_ts, self.id)
+            assert ts >= prev_ts, "monotonic time error for entry {0} key {1}: {2} << {3}".format(self.id, k, ts, prev_ts)
             prev_ts = ts
 
 class TorPerfParser(Parser):
@@ -437,7 +437,7 @@ class TorPerfParser(Parser):
 
                             # make sure the timestamps are in order, if not, we catch the error
                             # and wont add this entry to the completed downloads
-                            self.transfers[tid].assert_order()
+                            self.transfers[tid].assert_monotonic_order()
                             self.sizes[filesize].append(self.transfers[tid])
                             self.transfers.pop(tid)
 
@@ -466,7 +466,7 @@ class TorPerfParser(Parser):
 
         for size_bytes in self.sizes:
             l = self.sizes[size_bytes]
-            filepath = "{0}/onionperf-{1}-{2}.tpf".format(output_prefix, size_bytes, datestr)
+            filepath = "{0}/{1}-{2}-{3}.tpf".format(output_prefix, self.name, size_bytes, datestr)
             should_append = os.path.exists(filepath) and not compress
             output = util.FileWritable(filepath, do_compress=compress)
             output.open()
