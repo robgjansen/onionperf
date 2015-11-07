@@ -212,7 +212,9 @@ class TGenParser(Parser):
 
                     elif 'transfer-error' in parts[6]:
                         self.num_errors += 1
-                        code = parts[10].strip('()').split('-')[7].split('=')[1]
+                        transfer_str = parts[10]
+                        splitchar = ',' if ',' in transfer_str else '-'
+                        code = transfer_str.strip('()').split(splitchar)[7].split('=')[1]
                         if code not in self.data['errors']: self.data['errors'][code] = {}
                         if second not in self.data['errors'][code]: self.data['errors'][code][second] = []
                         self.data['errors'][code][second].append(bytes)
@@ -312,10 +314,12 @@ class TorParser(Parser):
         return d
 
 class TorPerfEntry(object):
-    def __init__(self, tid, local_proxy_str, remote_server_str, filesize):
+    def __init__(self, tid, local_proxy_str, remote_server_str, local_hostname, remote_hostname, filesize):
         self.id = tid
         self.local_proxy_str = local_proxy_str
         self.remote_server_str = remote_server_str
+        self.local_hostname = local_hostname
+        self.remote_hostname = remote_hostname
         self.data = {}
         # https://collector.torproject.org/#type-torperf
         # TODO make this an enum
@@ -347,6 +351,8 @@ class TorPerfEntry(object):
     def to_torperf_string(self):
         self.data['ENDPOINT-LOCAL'] = self.local_proxy_str
         self.data['ENDPOINT-REMOTE'] = self.remote_server_str
+        self.data['HOSTNAME-LOCAL'] = self.local_hostname
+        self.data['HOSTNAME-REMOTE'] = self.remote_hostname
         return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
 
     def assert_monotonic_order(self):
@@ -391,21 +397,25 @@ class TorPerfParser(Parser):
                     if is_new:
                         # another run of tgen starts the id over counting up from 1
                         # if a prev transfer with the same id did not complete, we can be sure it never will
-                        tid = int(line.strip().split()[7].strip('()').split('-')[0])
+                        transfer_str = line.strip().split()[7]
+                        splitchar = ',' if ',' in transfer_str else '-'
+                        tid = int(transfer_str.strip('()').split(splitchar)[0])
                         if tid in self.transfers: self.transfers.pop(tid)
 
                     if is_status or is_complete:
                         parts = line.strip().split()
-                        unix_ts, transport, transfer, status = float(parts[2]), parts[8], parts[10], parts[13]
+                        unix_ts, transport_str, transfer_str, status = float(parts[2]), parts[8], parts[10], parts[13]
                         downloaded, filesize = [int(i) for i in status.split('=')[1].split('/')]
 
-                        transfer_parts = transfer.strip('()').split('-')
+                        transfer_parts = transfer_str.strip('()').split(',' if ',' in transfer_str else '-')
                         tid = int(transfer_parts[0])
 
                         # create if needed
                         if tid not in self.transfers:
-                            transport_parts = transport.strip('()').split('-')
-                            self.transfers[tid] = TorPerfEntry(tid, transport_parts[2], transport_parts[3], filesize)
+                            transport_parts = transport_str.strip('()').split(',' if ',' in transport_str else '-')
+                            endpoint_local, endpoint_remote = transport_parts[2], transport_parts[3]
+                            hostname_local, hostname_remote = transfer_parts[1], transfer_parts[4]
+                            self.transfers[tid] = TorPerfEntry(tid, endpoint_local, endpoint_remote, hostname_local, hostname_remote, filesize)
 
                         # stats to add during download
                         self.transfers[tid].update_progress(unix_ts, downloaded)
