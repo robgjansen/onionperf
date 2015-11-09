@@ -363,8 +363,11 @@ class TorPerfEntry(object):
         prev_ts = 0.0
         for k in keys_in_order:
             ts = float(self.data[k])
-            assert ts >= prev_ts, "monotonic time error for entry {0} key {1}: {2} << {3}".format(self.id, k, ts, prev_ts)
+            if ts < prev_ts:
+                logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.id, k, ts, prev_ts))
+                return False
             prev_ts = ts
+        return True
 
 class TorPerfParser(Parser):
 
@@ -373,7 +376,7 @@ class TorPerfParser(Parser):
         self.name = name
         self.transfers = {}
         self.sizes = {}
-        self.first_complete_dt = datetime.datetime.today()
+        self.first_complete_dt = None
 
     def parse(self):
         for s in self.sources:
@@ -443,9 +446,9 @@ class TorPerfParser(Parser):
 
                             # make sure the timestamps are in order, if not, we catch the error
                             # and wont add this entry to the completed downloads
-                            self.transfers[tid].assert_monotonic_order()
-                            self.sizes[filesize].append(self.transfers[tid])
-                            self.transfers.pop(tid)
+                            if self.transfers[tid].assert_monotonic_order():
+                                self.sizes[filesize].append(self.transfers[tid])
+                                self.transfers.pop(tid)
 
                     if is_torctlmsg:
                         # parse with stem
@@ -467,6 +470,7 @@ class TorPerfParser(Parser):
 
         if self.name is None: self.name = gethostname().split('.')[0]
 
+        # the utc datetime corresponding to when the first download completed that we parsed
         d = self.first_complete_dt
         datestr = "{0:04d}-{1:02d}-{2:02d}".format(d.year, d.month, d.day) if d is not None else "0000-00-00"
 

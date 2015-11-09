@@ -172,7 +172,7 @@ class FileWritable(Writable):
         # build up the new filename with an embedded timestamp
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
-        ts = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H:%M:%S")
+        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
         new_filename = self.filename.replace(base, "log_archive/{0}".format(new_base))
 

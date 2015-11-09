@@ -90,17 +90,17 @@ def logrotate_thread_task(writables, parse_torperf, docroot, nickname, done_ev):
 
     while not done_ev.wait(1):
         # get time
-        now = datetime.datetime.utcnow()
+        utcnow = datetime.datetime.utcnow()
 
         # setup the next expiration time (midnight tonight)
         if next_midnight is None:
             oneday = datetime.timedelta(1)
-            tomorrow = now + oneday
+            tomorrow = utcnow + oneday
             hr, min, sec = 0, 0, 0
             next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, hr, min, sec)
 
         # if we are past midnight, launch the rotate task
-        if (next_midnight - now).total_seconds() < 0:
+        if (next_midnight - utcnow).total_seconds() < 0:
             next_midnight = None
             filepaths = [w.rotate_file() for w in writables]
             if parse_torperf:
