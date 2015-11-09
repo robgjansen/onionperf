@@ -371,7 +371,6 @@ class TorPerfParser(Parser):
     def __init__(self, sources, name=None):
         self.sources = sources
         self.name = name
-        self.boot_succeeded = False
         self.transfers = {}
         self.sizes = {}
         self.first_complete_dt = datetime.datetime.today()
@@ -383,12 +382,6 @@ class TorPerfParser(Parser):
                 try:
                     if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
                         self.name = line.strip().split()[11].split('.')[0]
-
-                    if not self.boot_succeeded:
-                        if re.search("Bootstrapped\s100", line) is not None:
-                            self.boot_succeeded = True
-                        elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
-                            self.boot_succeeded = True
 
                     # parse out torperf stats
                     is_new, is_status, is_complete, is_torctlmsg = False, False, False, False
