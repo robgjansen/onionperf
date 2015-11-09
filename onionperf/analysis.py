@@ -350,10 +350,10 @@ class TorPerfEntry(object):
             self.data[key] = value
 
     def to_torperf_string(self):
-        self.data['ENDPOINT-LOCAL'] = self.local_proxy_str
-        self.data['ENDPOINT-REMOTE'] = self.remote_server_str
-        self.data['HOSTNAME-LOCAL'] = self.local_hostname
-        self.data['HOSTNAME-REMOTE'] = self.remote_hostname
+        self.data['ENDPOINTLOCAL'] = self.local_proxy_str
+        self.data['ENDPOINTREMOTE'] = self.remote_server_str
+        self.data['HOSTNAMELOCAL'] = self.local_hostname
+        self.data['HOSTNAMEREMOTE'] = self.remote_hostname
         return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
 
     def assert_monotonic_order(self):
@@ -475,7 +475,7 @@ class TorPerfParser(Parser):
         if self.name is None: self.name = gethostname().split('.')[0]
 
         d = self.first_complete_dt
-        datestr = "{0}-{1}-{2}".format(d.year, d.month, d.day) if d is not None else "0000-00-00"
+        datestr = "{0:04d}-{1:02d}-{2:02d}".format(d.year, d.month, d.day) if d is not None else "0000-00-00"
 
         for size_bytes in self.sizes:
             l = self.sizes[size_bytes]
