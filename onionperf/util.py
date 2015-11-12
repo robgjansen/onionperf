@@ -17,6 +17,47 @@ def make_path(path):
         os.makedirs(p)
     return p
 
+def find_file_paths(searchpath, patterns):
+    paths = []
+    if searchpath.endswith("/-"): paths.append("-")
+    else:
+        for root, dirs, files in os.walk(searchpath):
+            for name in files:
+                found = False
+                fpath = os.path.join(root, name)
+                fbase = os.path.basename(fpath)
+                for pattern in patterns:
+                    if re.search(pattern, fbase): found = True
+                if found: paths.append(fpath)
+    return paths
+
+def find_file_paths_pairs(searchpath, patterns_a, patterns_b):
+    paths = []
+    for root, dirs, files in os.walk(searchpath):
+        for name in files:
+            fpath = os.path.join(root, name)
+            fbase = os.path.basename(fpath)
+
+            paths_a = []
+            found = False
+            for pattern in patterns_a:
+                if re.search(pattern, fbase): 
+                    found = True
+            if found: 
+                paths_a.append(fpath)
+
+            paths_b = []
+            found = False
+            for pattern in patterns_b:
+                if re.search(pattern, fbase): 
+                    found = True
+            if found: 
+                paths_b.append(fpath)
+
+            if len(paths_a) > 0 or len(paths_b) > 0:
+                paths.append((paths_a, paths_b))
+    return paths
+
 def find_path(binpath, defaultname):
     # find the path to tor
     if binpath is not None:

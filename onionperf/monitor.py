@@ -24,10 +24,10 @@ class TorMonitor(object):
         with stem.control.Controller.from_port(port=self.tor_ctl_port) as torctl:
             torctl.authenticate()
 
-            vers_str = "Starting torctl program on host {2} using Tor version {0} status={1}".format(torctl.get_info('version'), torctl.get_info('status/version/current'), gethostname())
+            vers_str = "Starting torctl program on host {2} using Tor version {0} status={1}\n".format(torctl.get_info('version'), torctl.get_info('status/version/current'), gethostname())
             self.__log(self.writable, vers_str)
 
-            boot_str = torctl.get_info('status/bootstrap-phase')
+            boot_str = "{0}\n".format(torctl.get_info('status/bootstrap-phase'))
             self.__log(self.writable, boot_str)
 
             # register for async events!

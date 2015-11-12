@@ -85,7 +85,7 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
     # master asked us to stop, close the writable before exiting thread
     writable.close()
 
-def logrotate_thread_task(writables, parse_torperf, docroot, nickname, done_ev):
+def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, nickname, done_ev):
     next_midnight = None
 
     while not done_ev.wait(1):
@@ -94,28 +94,42 @@ def logrotate_thread_task(writables, parse_torperf, docroot, nickname, done_ev):
 
         # setup the next expiration time (midnight tonight)
         if next_midnight is None:
-            oneday = datetime.timedelta(1)
-            tomorrow = utcnow + oneday
-            hr, min, sec = 0, 0, 0
-            next_midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, hr, min, sec)
+            next_midnight = datetime(utcnow.year, utcnow.month, utcnow.day, 23, 59, 59)
+            # make sure we are not already past the above time today
+            if (next_midnight - utcnow).total_seconds() < 0:
+                next_midnight -= datetime.timedelta(1)  # subtract 1 day
 
         # if we are past midnight, launch the rotate task
         if (next_midnight - utcnow).total_seconds() < 0:
-            next_midnight = None
-            filepaths = [w.rotate_file() for w in writables]
-            if parse_torperf:
-                try:
-                    # process the files to compute torperf results
-                    sources = [util.DataSource(filepath) for filepath in filepaths]
-                    parser = analysis.TorPerfParser(sources, name=nickname)
-                    parser.parse()
+            # handle the general writables we are watching
+            for w in writables:
+                w.rotate_file()
 
-                    # put the output in the twistd docroot
-                    parser.export_torperf_files(output_prefix=docroot, compress=False)
-                    # update the xml index
+            # handle tgen and tor writables specially, and do analysis
+            if tgen_writable is not None or torctl_writable is not None:
+                try:
+                    # set up the analysis object with our log files
+                    anal = analysis.Analysis(nickname=nickname)
+                    if tgen_writable is not None:
+                        anal.add_tgen_file(tgen_writable.rotate_file())
+                    if torctl_writable is not None:
+                        anal.add_torctl_file(torctl_writable.rotate_file())
+
+                    # run the analysis, i.e. parse the files
+                    anal.analyze(do_simple=False)
+
+                    # save the results in onionperf and torperf format in the twistd docroot
+                    anal_filename = "{0:04d}-{1:02d}-{2:02d}.onionperf.analysis.json.xz".format(next_midnight.year, next_midnight.month, next_midnight.day)
+                    anal.save(filename=anal_filename, output_prefix=docroot, do_compress=True)
+                    anal.export_torperf_version_1_0(output_prefix=docroot, datetimestamp=next_midnight, do_compress=False)
+
+                    # update the xml index in docroot
                     generate_docroot_index(docroot)
                 except Exception as e:
                     logging.warning("Caught and ignored exception in TorPerf log parser: {0}".format(repr(e)))
+
+            # reset our timer
+            next_midnight = None
 
 class Measurement(object):
 
@@ -230,16 +244,11 @@ class Measurement(object):
             logging.info("Exiting")
 
     def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
-        # rotate all log files that dont need special parsing
-        logrotate_args = (general_writables, False, None, self.nickname, self.done_event)
-        logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate_general", args=logrotate_args)
+        # rotate the log files, and then parse out the torperf measurement data
+        logrotate_args = (general_writables, tgen_writable, torctl_writable, self.twisted_docroot, self.nickname, self.done_event)
+        logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate", args=logrotate_args)
         logrotate.start()
         self.threads.append(logrotate)
-        # rotate the log files, and then parse out the torperf measurement data
-        logrotate_torperf_args = ([tgen_writable, torctl_writable], True, self.twisted_docroot, self.nickname, self.done_event)
-        logrotate_torperf = threading.Thread(target=logrotate_thread_task, name="logrotate_torperf", args=logrotate_torperf_args)
-        logrotate_torperf.start()
-        self.threads.append(logrotate_torperf)
 
     def __start_tgen_client(self, server_urls):
         return self.__start_tgen("client", 58889, 59001, server_urls)
@@ -263,7 +272,7 @@ class Measurement(object):
 
         tgen_logpath = "{0}/onionperf.tgen.log".format(tgen_datadir)
         tgen_writable = util.FileWritable(tgen_logpath)
-        logging.info("logging TGen client process output to {0}".format(tgen_logpath))
+        logging.info("Logging TGen client process output to {0}".format(tgen_logpath))
 
         tgen_cmd = "{0} {1}".format(self.tgen_bin_path, tgen_confpath)
         tgen_args = (tgen_cmd, tgen_datadir, tgen_writable, self.done_event, None, None, None)
@@ -281,7 +290,7 @@ class Measurement(object):
 
         twisted_logpath = "{0}/onionperf.twisted.log".format(twisted_datadir)
         twisted_writable = util.FileWritable(twisted_logpath)
-        logging.info("logging Twisted process output to {0}".format(twisted_logpath))
+        logging.info("Logging Twisted process output to {0}".format(twisted_logpath))
 
         twisted_docroot = "{0}/docroot".format(twisted_datadir)
         if not os.path.exists(twisted_docroot): os.makedirs(twisted_docroot)

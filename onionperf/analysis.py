@@ -4,485 +4,519 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-from abc import ABCMeta, abstractmethod, abstractproperty
-from __builtin__ import classmethod
+from abc import ABCMeta, abstractmethod
 
 import sys, os, re, json, datetime, logging
 from multiprocessing import Pool, cpu_count
 from signal import signal, SIGINT, SIG_IGN
 
+import stem, stem.response, stem.response.events
 from stem.response import ControlMessage, convert
 import util
 from socket import gethostname
 
-def analyze_subproc_func(parser):
-    signal(SIGINT, SIG_IGN)  # ignore interrupts
-    parser.parse()
-    return parser
-
 class Analysis(object):
-    '''
-    A utility to help analyze onionperf output. Currently, this parses tgen transfer complete messages, and plots the results to a PDF file that is saved in the current directory.
-    '''
-    __metaclass__ = ABCMeta
 
-    @abstractproperty
-    def default_filename(self):
-        pass
+    def __init__(self, nickname=None):
+        self.nickname = nickname
+        self.hostname = gethostname().split('.')[0]
+        self.json_db = {'type':'onionperf', 'version':1.0, 'data':{}}
+        self.tgen_filepaths = []
+        self.torctl_filepaths = []
 
-    @abstractmethod
-    def new_parser(self, sources):
-        pass
+    def add_tgen_file(self, filepath):
+        self.tgen_filepaths.append(filepath)
 
-    def __init__(self):
-        self.result = None
+    def add_torctl_file(self, filepath):
+        self.torctl_filepaths.append(filepath)
 
-    # this is meant to be used in cases where a single 'parser' instance should process
-    # multiple files because state needs to be kept across all of the files
-    # for example, it can be used when a large log file was split to several smaller files
-    # the parser will process them in sequence
-    def analyze_files(self, filepaths_list):
-        sources = [util.DataSource(filepath) for filepath in filepaths_list]
-        parser = self.new_parser(sources)
-        parser.parse()
-        self.result = parser.merge([])
+    def analyze(self, do_simple=True):
+        for (filepaths, parser) in [(self.tgen_filepaths, TGenParser()), (self.torctl_filepaths, TorCtlParser())]:
+            if len(filepaths) > 0:
+                for filepath in filepaths:
+                    logging.info("parsing log file at {0}".format(filepath))
+                    parser.parse(util.DataSource(filepath), do_simple=do_simple)
+                parsed_name = parser.get_name()
+                n = self.nickname
+                if n is None:
+                    n = parsed_name if parsed_name is not None else self.hostname
+                self.json_db['data'].setdefault(n, {}).setdefault('tgen', parser.get_data())
 
-    def analyze_file(self, filepath):
-        self.analyze_files([filepath])
+    def merge(self, analysis):
+        for nickname in analysis.json_db['data']:
+            if nickname in self.json_db['data']:
+                raise Exception("Merge does not yet support multiple Analysis objects from the same node \
+                (add multiple files from the same node to the same Analysis object before calling analyze instead)")
+            else:
+                self.json_db['data'][nickname] = analysis.json_db['data'][nickname]
+
+    def save(self, filename="onionperf.analysis.json.xz", output_prefix=os.getcwd(), do_compress=True, version=1.0):
+        filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(output_prefix, filename)))
+        if not os.path.exists(output_prefix):
+            os.makedirs(output_prefix)
+
+        logging.info("saving analysis results to {0}".format(filepath))
+
+        outf = util.FileWritable(filepath, do_compress=do_compress)
+        json.dump(self.json_db, outf, sort_keys=True, separators=(',', ': '), indent=2)
+        outf.close()
+
+        logging.info("done!")
 
     @classmethod
-    def __analyze_subproc_func(cls, parser):
-        signal(SIGINT, SIG_IGN)  # ignore interrupts
-        parser.parse()
-        return parser
+    def load(cls, filename="onionperf.analysis.json.xz", input_prefix=os.getcwd(), version=1.0):
+        filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(input_prefix, filename)))
+        if not os.path.exists(filepath):
+            logging.warning("file does not exist at '{0}'".format(filepath))
+            return None
 
-    # this is meant to be used in cases where each matching file in the directory should be processed
-    # by separate parsers, because each of those files do not need to share parser state
-    # this is useful when different nodes create their own log files, and we want to process them
-    # all in parallel
-    def analyze_directory(self, search_path, search_expressions, num_subprocs=1):
-        logfilepaths = Analysis.find_file_paths(search_path, search_expressions)
-        logging.info("processing input from {0} files...".format(len(logfilepaths)))
+        logging.info("loading analysis results from {0}".format(filepath))
 
-        if num_subprocs <= 0: num_subprocs = cpu_count()
-        pool = Pool(num_subprocs)
-        parsers = [self.new_parser([util.DataSource(filepath)]) for filepath in logfilepaths]
+        inf = util.DataSource(filepath)
+        inf.open()
+        db = json.load(inf.get_file_handle())
+        inf.close()
+
+        logging.info("done!")
+
+        if 'type' not in db or 'version' not in db:
+            logging.warning("'type' or 'version' not present in database")
+            return None
+        elif db['type'] != 'onionperf' or db['version'] != 1.0:
+            logging.warning("type or version not supported (type={0}, version={1})".format(db['type'], db['version']))
+            return None
+        else:
+            analysis_instance = cls()
+            analysis_instance.json_db = db
+            return analysis_instance
+
+    def export_torperf_version_1_0(self, output_prefix=os.getcwd(), datetimestamp=None, do_compress=False):
+        # export file in `@type torperf 1.0` format: https://collector.torproject.org/#type-torperf
+        if not os.path.exists(output_prefix):
+            os.makedirs(output_prefix)
+
+        if datetimestamp is None:
+            datetimestamp = datetime.datetime.utcnow()
+        datestr = "{0:04d}-{1:02d}-{2:02d}".format(datetimestamp.year, datetimestamp.month, datetimestamp.day)
+
+        for nickname in self.json_db['data']:
+            if 'tgen' not in self.json_db['data'][nickname] or 'transfers' not in self.json_db['data'][nickname]['tgen']:
+                continue
+
+            xfers_by_filesize = {}
+            for xfer_db in self.json_db['data'][nickname]['tgen']['transfers'].values():
+                xfers_by_filesize.setdefault(xfer_db['filesize_bytes'], []).append(xfer_db)
+
+            for filesize in xfers_by_filesize:
+                filepath = "{0}/{1}-{2}-{3}.tpf{4}".format(output_prefix, nickname, filesize, datestr, '.xz' if do_compress else '')
+
+                logging.info("saving analysis results to {0}".format(filepath))
+
+                output = util.FileWritable(filepath, do_compress=do_compress)
+                output.open()
+
+                should_append = os.path.exists(filepath) and not do_compress
+                if not should_append:
+                    output.write("@type torperf 1.0\r\n")
+
+                for xfer_db in xfers_by_filesize[filesize]:
+                    d = {}
+
+                    d['SOURCE'] = nickname
+                    d['ENDPOINTLOCAL'] = xfer_db['endpoint_local']
+                    d['ENDPOINTPROXY'] = xfer_db['endpoint_proxy']
+                    d['ENDPOINTREMOTE'] = xfer_db['endpoint_remote']
+                    d['HOSTNAMELOCAL'] = xfer_db['hostname_local']
+                    d['HOSTNAMEREMOTE'] = xfer_db['hostname_remote']
+
+                    d['FILESIZE'] = xfer_db['filesize_bytes']
+                    d['READBYTES'] = xfer_db['total_bytes_read']
+                    d['WRITEBYTES'] = xfer_db['total_bytes_write']
+
+                    def ts_to_str(ts): return"{0:.02f}".format(ts)
+
+                    d['START'] = ts_to_str(xfer_db['unix_ts_start'])
+                    d['SOCKET'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_create'])
+                    d['CONNECT'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_connect'])
+                    d['NEGOTIATE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_choice'])
+                    d['REQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_request'])
+                    d['RESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_response'])
+                    d['DATAREQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['command'])
+                    d['DATARESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['response'])
+
+                    # set DATAPERC[10,20,...,90]
+                    for decile in sorted(xfer_db['elapsed_seconds']['payload'].keys()):
+                        if xfer_db['elapsed_seconds']['payload'][decile] is not None:
+                            d['DATAPERC{0}'.format(int(decile * 100))] = xfer_db['elapsed_seconds']['payload'][decile]
+
+                    d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
+
+                    d['LAUNCH'] = None
+                    d['PATH'] = None
+                    d['BUILDTIMES'] = None
+                    d['QUANTILE'] = None
+                    d['TIMEOUT'] = None
+                    d['CIRC_ID'] = None
+                    d['USED_AT'] = None
+                    d['USED_BY'] = None
+                    d['DIDTIMEOUT'] = None
+
+                    output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
+                    output.write("{0}\r\n".format(output_str))
+
+                output.close()
+                logging.info("done!")
+
+def subproc_analyze_func(analysis_args):
+    signal(SIGINT, SIG_IGN)  # ignore interrupts
+    a = analysis_args[0]
+    do_simple = analysis_args[1]
+    a.analyze(do_simple=do_simple)
+    return a
+
+class ParallelAnalysis(Analysis):
+
+    def analyze(self, search_path, do_simple=True, nickname=None, tgen_search_expressions=["tgen.*\.log"],
+                torctl_search_expressions=["torctl.*\.log"], num_subprocs=cpu_count()):
+
+        pathpairs = util.find_file_paths_pairs(search_path, tgen_search_expressions, torctl_search_expressions)
+        logging.info("processing input from {0} nodes...".format(len(pathpairs)))
+
+        analysis_jobs = []
+        for (tgen_filepaths, torctl_filepaths) in pathpairs:
+            a = Analysis()
+            for tgen_filepath in tgen_filepaths:
+                a.add_tgen_file(tgen_filepath)
+            for torctl_filepath in torctl_filepaths:
+                a.add_torctl_file(torctl_filepath)
+            analysis_args = [a, do_simple]
+            analysis_jobs.append(analysis_args)
+
+        analyses = None
+        pool = Pool(num_subprocs if num_subprocs > 0 else cpu_count())
         try:
-            mr = pool.map_async(analyze_subproc_func, parsers)
+            mr = pool.map_async(subproc_analyze_func, analysis_jobs)
             pool.close()
             while not mr.ready(): mr.wait(1)
-            parsers = mr.get()
+            analyses = mr.get()
         except KeyboardInterrupt:
             logging.info("interrupted, terminating process pool")
             pool.terminate()
             pool.join()
             sys.exit()
 
-        if parsers is not None and len(parsers) > 0:
-            parser = parsers.pop()
-            self.result = parser.merge(parsers)
+        logging.info("merging {0} analysis results now...".format(len(analyses)))
+        while analyses is not None and len(analyses) > 0:
+            self.merge(analyses.pop())
+        logging.info("done merging results: {0} total nicknames present in json db".format(len(self.json_db['data'])))
 
-    @classmethod
-    def find_file_paths(cls, searchpath, patterns):
-        paths = []
-        if searchpath.endswith("/-"): paths.append("-")
-        else:
-            for root, dirs, files in os.walk(searchpath):
-                for name in files:
-                    found = False
-                    fpath = os.path.join(root, name)
-                    fbase = os.path.basename(fpath)
-                    for pattern in patterns:
-                        if re.search(pattern, fbase): found = True
-                    if found: paths.append(fpath)
-        return paths
+class TransferStatusEvent(object):
 
-    def dump_to_file(self, filename, output_prefix=os.getcwd(), compress=True):
-        if self.result == None:
-            logging.warning("we have no analysis results to dump!")
-            return
+    def __init__(self, line):
+        self.is_success = False
+        self.is_error = False
+        self.is_complete = False
 
-        logging.info("dumping stats in {0}".format(output_prefix))
+        parts = line.strip().split()
+        self.unix_ts = util.timestamp_to_seconds(parts[2])
 
-        if not os.path.exists(output_prefix): os.makedirs(output_prefix)
-        filepath = "{0}/{1}".format(output_prefix, filename)
+        transport_parts = parts[8].split(',' if ',' in parts[8] else '-')
+        self.endpoint_local = transport_parts[2]
+        self.endpoint_proxy = transport_parts[3]
+        self.endpoint_remote = transport_parts[4]
 
-        output = util.FileWritable(filepath, do_compress=compress)
-        output.open()
-        json.dump(self.result, output.file, sort_keys=True, separators=(',', ': '), indent=2)
-        output.close()
+        transfer_parts = parts[10].split(',' if ',' in parts[10] else '-')
+        transfer_num = int(transfer_parts[0])
+        self.hostname_local = transfer_parts[1]
+        self.method = transfer_parts[2]  # 'GET' or 'PUT'
+        self.filesize_bytes = int(transfer_parts[3])
+        self.hostname_remote = transfer_parts[4]
+        self.error_code = transfer_parts[7].split('=')[1]
 
-        logging.info("all done dumping stats to {0}".format(output.filename))
+        # for id, combine the time with the transfer num; this is unique for each node,
+        # as long as the node was running tgen without restarting for 100 seconds or longer
+        # #self.transfer_id = "{0}-{1}".format(round(self.unix_ts, -2), transfer_num)
+        self.transfer_id = transfer_num
 
-    @classmethod
-    def from_file(cls, input_prefix=os.getcwd(), filename=None):
-        analysis_instance = cls()
+        self.total_bytes_read = int(parts[11].split('=')[1])
+        self.total_bytes_write = int(parts[12].split('=')[1])
 
-        if filename is None:
-            filename = analysis_instance.default_filename
-        logpath = os.path.abspath(os.path.expanduser("{0}/{1}".format(input_prefix, filename)))
+        # the commander is the side that sent the command,
+        # i.e., the side that is driving the download, i.e., the client side
+        progress_parts = parts[13].split('=')
+        self.is_commander = (self.method == 'GET' and 'read' in progress_parts[0]) or \
+                            (self.method == 'PUT' and 'write' in progress_parts[0])
+        self.payload_bytes_status = int(progress_parts[1].split('/')[0])
 
-        if not os.path.exists(logpath):
-            logging.warning("unable to load analysis results from log file at '{0}'".format(logpath))
-            if not logpath.endswith(".xz"):
-                logpath += ".xz"
-                print >> sys.stderr, "trying '{0}'".format(logpath)
-                if not os.path.exists(logpath):
-                    logging.warning("unable to load analysis results from log file at '{0}'".format(logpath))
-                    return None
+        self.unconsumed_parts = None if len(parts) < 16 else parts[15:]
+        self.elapsed_seconds = {}
 
-        s = util.DataSource(logpath)
-        s.open()
-        analysis_instance.result = json.load(s.get_file_handle())
-        s.close()
-        return analysis_instance
-        # data = prune_data(data, skiptime, rskiptime)
-        # tgendata.append((data['nodes'], label, lfcycle.next()))
+class TransferCompleteEvent(TransferStatusEvent):
+    def __init__(self, line):
+        super(TransferCompleteEvent, self).__init__(line)
+        self.is_complete = True
 
-class TGenAnalysis(Analysis):
+        def keyval_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000.0
 
-    @property
-    def default_filename(self):
-        return "stats.tgen.json"
+        prev_elapsed = 0.0
+        # match up self.unconsumed_parts[0:11] with the events in the transfer_steps enum
+        for k in ['socket_create', 'socket_connect', 'proxy_init', 'proxy_choice', 'proxy_request',
+                  'proxy_response', 'command', 'response', 'first_byte', 'last_byte', 'checksum']:
+            # parse out the elapsed time value
+            self.elapsed_seconds.setdefault(k, keyval_to_secs(self.unconsumed_parts[len(self.elapsed_seconds)]))
 
-    def new_parser(self, sources):
-        return TGenParser(sources)
+            # make sure the elapsed times are monotonically increasing
+            next_elapsed = self.elapsed_seconds[k]
+            if next_elapsed < prev_elapsed:
+                logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.id, k, next_elapsed, prev_elapsed))
+                return None
+            prev_elapsed = next_elapsed
 
-class TorAnalysis(Analysis):
+        self.unix_ts_end = self.unix_ts
+        self.unix_ts_start = self.unix_ts - self.elapsed_seconds['checksum']
+        del(self.unconsumed_parts)
 
-    @property
-    def default_filename(self):
-        return "stats.tor.json"
+class TransferSuccessEvent(TransferCompleteEvent):
+    def __init__(self, line):
+        super(TransferSuccessEvent, self).__init__(line)
+        self.is_success = True
 
-    def new_parser(self, sources):
-        return TorParser(sources)
+class TransferErrorEvent(TransferCompleteEvent):
+    def __init__(self, line):
+        super(TransferErrorEvent, self).__init__(line)
+        self.is_error = True
+
+class Transfer(object):
+    def __init__(self, tid):
+        self.id = tid
+        self.last_event = None
+        self.payload_progress = {decile:None for decile in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]}
+
+    def add_event(self, status_event):
+        progress_frac = float(status_event.payload_bytes_status) / float(status_event.filesize_bytes)
+        for decile in sorted(self.payload_progress.keys()):
+            if progress_frac >= decile and self.payload_progress[decile] is None:
+                self.payload_progress[decile] = status_event.unix_ts
+        self.last_event = status_event
+
+    def get_data(self):
+        e = self.last_event
+        if e is None or not e.is_complete:
+            return None
+        d = e.__dict__
+        d['elapsed_seconds']['payload'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress}
+        return d
 
 class Parser(object):
     __metaclass__ = ABCMeta
-
     @abstractmethod
-    def parse(self, sources):
+    def parse(self, source, do_simple):
         pass
-
     @abstractmethod
-    def merge(self, parsers):
+    def get_data(self):
+        pass
+    @abstractmethod
+    def get_name(self):
         pass
 
 class TGenParser(Parser):
 
-    def __init__(self, sources):
-        self.sources = sources
-        self.data = {'firstbyte':{}, 'lastbyte':{}, 'errors':{}}
-        self.parsed_name = None
-        self.num_successes = 0
-        self.num_errors = 0
+    def __init__(self):
+        self.state = {}
+        self.transfers = {}
+        self.transfers_summary = {'time_to_first_byte':{}, 'time_to_last_byte':{}, 'errors':{}}
+        self.name = None
 
-    def parse(self):
-        for s in self.sources:
-            s.open()
-            for line in s:
-                if self.parsed_name is None and re.search("Initializing traffic generator on host", line) is not None:
-                    self.parsed_name = line.strip().split()[11]
-                elif re.search("transfer-complete", line) is not None or re.search("transfer-error", line) is not None:
-                    parts = line.strip().split()
-                    if len(parts) < 26: continue
-                    sim_seconds = util.timestamp_to_seconds(parts[2])
-                    second = int(sim_seconds)
+    def __parse_line(self, line, do_simple):
+        if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
+            self.name = line.strip().split()[11]
 
-                    ioparts = parts[13].split('=')
-                    iodirection = ioparts[0]
-                    if 'read' not in iodirection: return None  # this is a server, do we want its stats?
-                    bytes = int(ioparts[1].split('/')[0])
+        elif not do_simple and re.search("state\sRESPONSE\sto\sstate\sPAYLOAD", line) is not None:
+            # another run of tgen starts the id over counting up from 1
+            # if a prev transfer with the same id did not complete, we can be sure it never will
+            parts = line.strip().split()
+            transfer_id = int(parts[7].strip().split(',' if ',' in parts[7] else '-')[0])
+            if transfer_id in self.state:
+                self.state.pop(transfer_id)
 
-                    if 'transfer-complete' in parts[6]:
-                        self.num_successes += 1
-                        cmdtime = int(parts[21].split('=')[1]) / 1000.0
-                        rsptime = int(parts[22].split('=')[1]) / 1000.0
-                        fbtime = int(parts[23].split('=')[1]) / 1000.0
-                        lbtime = int(parts[24].split('=')[1]) / 1000.0
-                        chktime = int(parts[25].split('=')[1]) / 1000.0
+        elif not do_simple and re.search("transfer-status", line) is not None:
+            status = TransferStatusEvent(line)
+            xfer = self.state.setdefault(status.transfer_id, Transfer(status.transfer_id))
+            xfer.add_event(status)
 
-                        if bytes not in self.data['firstbyte']: self.data['firstbyte'][bytes] = {}
-                        if second not in self.data['firstbyte'][bytes]: self.data['firstbyte'][bytes][second] = []
-                        self.data['firstbyte'][bytes][second].append(fbtime - cmdtime)
+        elif re.search("transfer-complete", line) is not None:
+            complete = TransferSuccessEvent(line)
 
-                        if bytes not in self.data['lastbyte']: self.data['lastbyte'][bytes] = {}
-                        if second not in self.data['lastbyte'][bytes]: self.data['lastbyte'][bytes][second] = []
-                        self.data['lastbyte'][bytes][second].append(lbtime - cmdtime)
+            if not do_simple:
+                xfer = self.state.setdefault(complete.transfer_id, Transfer(complete.transfer_id))
+                xfer.add_event(complete)
+                self.transfers[xfer.id] = xfer.get_data()
+                self.state.pop(complete.transfer_id)
 
-                    elif 'transfer-error' in parts[6]:
-                        self.num_errors += 1
-                        transfer_str = parts[10]
-                        splitchar = ',' if ',' in transfer_str else '-'
-                        code = transfer_str.strip('()').split(splitchar)[7].split('=')[1]
-                        if code not in self.data['errors']: self.data['errors'][code] = {}
-                        if second not in self.data['errors'][code]: self.data['errors'][code][second] = []
-                        self.data['errors'][code][second].append(bytes)
-            s.close()
+            filesize, second = complete.filesize_bytes, int(complete.unix_ts)
+            fb_secs = complete.elapsed_seconds['first_byte'] - complete.elapsed_seconds['command']
+            lb_secs = complete.elapsed_seconds['last_byte'] - complete.elapsed_seconds['command']
 
-    def merge(self, parsers):
-        d = {'nodes':{}}
-        name_count, noname_count, success_count, error_count = 0, 0, 0, 0
+            fb_list = self.transfers_summary['time_to_first_byte'].setdefault(filesize, {}).setdefault(second, [])
+            fb_list.append(fb_secs)
+            lb_list = self.transfers_summary['time_to_last_byte'].setdefault(filesize, {}).setdefault(second, [])
+            lb_list.append(lb_secs)
 
-        parsers.append(self)
-        logging.info("merging {0} parsed results now...".format(len(parsers)))
+        elif re.search("transfer-error", line) is not None:
+            error = TransferErrorEvent(line)
 
-        for parser in parsers:
-            if parser is None:
+            if not do_simple:
+                xfer = self.state.setdefault(error.transfer_id, Transfer(error.transfer_id))
+                xfer.add_event(error)
+                self.transfers[xfer.id] = xfer.get_data()
+                self.state.pop(error.transfer_id)
+
+            err_code, filesize, second = error.error_code, error.filesize_bytes, int(error.unix_ts)
+
+            err_list = self.transfers_summary['errors'].setdefault(err_code, {}).setdefault(second, [])
+            err_list.append(filesize)
+
+        return True
+
+    def parse(self, source, do_simple=True):
+        source.open()
+        for line in source:
+            # ignore line parsing errors
+            try:
+                if not self.__parse_line(line, do_simple):
+                    break
+            except:
+                logging.warning("TGenParser: skipping line due to parsing error: {0}".format(line))
+                raise
                 continue
-            if parser.parsed_name is None:
-                noname_count += 1
-                continue
-            name_count += 1
-            d['nodes'][parser.parsed_name] = parser.data
-            success_count += parser.num_successes
-            error_count += parser.num_errors
+        source.close()
 
-        logging.info("done merging results: {0} total successes, {1} total errors, {2} files with names, {3} files without names".format(success_count, error_count, name_count, noname_count))
-        return d
+    def get_data(self):
+        return {'transfers':self.transfers, 'transfers_summary': self.transfers_summary}
 
-class TorParser(Parser):
+    def get_name(self):
+        return self.name
 
-    def __init__(self, sources):
-        self.sources = sources
+class Stream(object):
+    def __init__(self, sid):
+        self.id = sid
+        self.circ_id = None
+        self.events = {}
+
+    def add_event(self, event, circ_id, arrived_at):
+        event_str = str(event)
+        if event_str not in self.events:
+            self.events[event_str] = arrived_at
+        if circ_id:
+            self.circ_id = circ_id
+
+    def get_event(self, event):
+        try:
+            return self.events[event]
+        except KeyError:
+            return None
+
+    def __str__(self):
+        return('stream id=%d circ_id=%s %s' % (self.id, self.circ_id,
+               ' '.join(['%s=%s' % (event, arrived_at)
+               for (event, arrived_at) in self.events.items()])))
+
+class Circuit(object):
+    def __init__(self, cid):
+        self.id = cid
+        self.events = {}
+
+    def add_event(self, event, arrived_at):
+        event_str = str(event)
+        if event_str not in self.events:
+            self.events[event_str] = arrived_at
+
+    def get_event(self, event):
+        try:
+            return self.events[event]
+        except KeyError:
+            return None
+
+    def __str__(self):
+        return('circuit id=%d %s' % (self.id, ' '.join(['%s=%s' %
+               (event, arrived_at) for (event, arrived_at) in
+               self.events.items()])))
+
+class TorCtlParser(Parser):
+
+    def __init__(self):
+        self.streams = {}
+        self.circuits = {}
         self.data = {'bytes_read':{}, 'bytes_written':{}}
         self.name = None
         self.boot_succeeded = False
         self.total_read = 0
         self.total_write = 0
 
-    def parse(self):
-        for s in self.sources:
-            # XXX this is a hack to try to get the name
-            # a better approach would be get the Tor nickname, from ctl port?
-            if self.name is None: self.name = os.path.basename(os.path.dirname(s.filename))
-            s.open()
-            for line in s:
-                if not self.boot_succeeded:
-                    if re.search("Starting\storctl\sprogram\son\shost", line) is not None:
-                        parts = line.strip().split()
-                        if len(parts) < 11: continue
-                        self.name = parts[10]
-                    if re.search("Bootstrapped\s100", line) is not None:
-                        self.boot_succeeded = True
-                    elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
-                        self.boot_succeeded = True
-                elif re.search("\s650\sBW\s", line) is not None:
-                    parts = line.strip().split()
-                    if len(parts) < 7: continue
-                    if 'Outbound' in line: print line  # # XXX wtf is this here for?
-                    second = int(float(parts[2]))
-                    bwr = int(parts[5])
-                    bww = int(parts[6])
+    def __handle_circuit_general(self, event, arrival_dt):
+        cid = int(event.id)
+        self.circuits.setdefault(cid, Circuit(cid)).add_event(event.state, arrival_dt)
 
-                    if second not in self.data['bytes_read']: self.data['bytes_read'][second] = 0
-                    self.data['bytes_read'][second] += bwr
-                    self.total_read += bwr
-                    if second not in self.data['bytes_written']: self.data['bytes_written'][second] = 0
-                    self.data['bytes_written'][second] += bww
-                    self.total_write += bww
-            s.close()
+    def __handle_circuit_hs(self, event, arrival_dt):
+        cid = int(event.id)
+        self.__handle_circuit_general(event, arrival_dt)
+        self.circuits.setdefault(cid, Circuit(cid)).add_event(event.hs_state, arrival_dt)
 
-    def merge(self, parsers):
-        d = {'nodes':{}}
-        name_count, noname_count, success_count, error_count, total_read, total_write = 0, 0, 0, 0, 0, 0
+    def __handle_stream(self, event, arrival_dt):
+        sid = int(event.id)
+        self.streams.setdefault(sid, Stream(sid)).add_event(event.status, event.circ_id, arrival_dt)
 
-        parsers.append(self)
-        logging.info("merging {0} parsed results now...".format(len(parsers)))
+    def __handle_event(self, event, arrival_dt):
+        if isinstance(event, (stem.response.events.CircuitEvent, stem.response.events.CircMinorEvent)):
+            if event.purpose is stem.CircPurpose.HS_CLIENT_GENERAL:
+                self.__handle_circuit_general(event, arrival_dt)
+            elif event.purpose in (stem.CircPurpose.HS_CLIENT_INTRO, stem.CircPurpose.HS_CLIENT_REND,
+                                   stem.CircPurpose.HS_SERVICE_INTRO, stem.CircPurpose.HS_SERVICE_REND):
+                self.__handle_circuit_hs(event, arrival_dt)
+        elif isinstance(event, stem.response.events.StreamEvent):
+            self.__handle_stream(event, arrival_dt)
 
-        for parser in parsers:
-            if parser is None:
-                continue
+    def __parse_line(self, line, do_simple):
+        if not self.boot_succeeded:
+            if re.search("Starting\storctl\sprogram\son\shost", line) is not None:
+                parts = line.strip().split()
+                if len(parts) < 11:
+                    return True
+                self.name = parts[10]
+            if re.search("Bootstrapped\s100", line) is not None:
+                self.boot_succeeded = True
+            elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
+                self.boot_succeeded = True
 
-            if parser.name is not None:
-                name_count += 1
-            else:
-                noname_count += 1
-                continue
+        # parse with stem
+        timestamps, sep, raw_event_str = line.partition(" 650 ")
+        if sep == '':
+            return True
 
-            if parser.boot_succeeded:
-                success_count += 1
-            else:
-                error_count += 1
-                logging.warning("tor running on host '{0}' did not fully bootstrap".format(parser.name))
-                continue
+        unix_ts = timestamps.strip().split()[2]
+        arrival_dt = datetime.datetime.fromtimestamp(unix_ts)
 
-            d['nodes'][parser.name] = parser.data
-            total_read += parser.total_read
-            total_write += parser.total_write
+        event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str.strip()))
+        convert('EVENT', event)
 
-        logging.info("done merging results: {0} boot success count, {1} boot error count, {2} files with names, {3} files without names, {4} total bytes read, {5} total bytes written".format(success_count, error_count, name_count, noname_count, total_read, total_write))
-        return d
-
-class TorPerfEntry(object):
-    def __init__(self, tid, local_proxy_str, remote_server_str, local_hostname, remote_hostname, filesize):
-        self.id = tid
-        self.local_proxy_str = local_proxy_str
-        self.remote_server_str = remote_server_str
-        self.local_hostname = local_hostname
-        self.remote_hostname = remote_hostname
-        self.data = {}
-        # https://collector.torproject.org/#type-torperf
-        # TODO make this an enum
-        for key in ['LAUNCH', 'START', 'SOCKET', 'CONNECT', 'NEGOTIATE', \
-                  'REQUEST', 'RESPONSE', 'DATAREQUEST', 'DATARESPONSE', \
-                  'DATAPERC10', 'DATAPERC20', 'DATAPERC30', 'DATAPERC40', 'DATAPERC50', \
-                  'DATAPERC60', 'DATAPERC70', 'DATAPERC80', 'DATAPERC90', 'DATACOMPLETE', \
-                  'SOURCE', 'FILESIZE', 'READBYTES', 'WRITEBYTES', \
-                  'PATH', 'BUILDTIMES', 'QUANTILE', 'TIMEOUT', \
-                  'CIRC_ID', 'USED_AT', 'USED_BY', 'DIDTIMEOUT']:
-            self.data[key] = None  # initialize known keys
-        self.set('FILESIZE', filesize)
-        self.last_bytes = 0
-
-    def update_progress(self, time, numbytes):
-        if numbytes > self.last_bytes:
-            self.last_bytes = numbytes
-            frac = float(self.last_bytes) / float(self.data['FILESIZE'])
-            perc = frac * 100.0
-            for i in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
-                k = 'DATAPERC{0}'.format(i)
-                if int(perc) >= i and self.data[k] is None:
-                    self.set(k, "{0:.2f}".format(time))
-
-    def set(self, key, value):
-        if key in self.data:
-            self.data[key] = value
-
-    def to_torperf_string(self):
-        self.data['ENDPOINTLOCAL'] = self.local_proxy_str
-        self.data['ENDPOINTREMOTE'] = self.remote_server_str
-        self.data['HOSTNAMELOCAL'] = self.local_hostname
-        self.data['HOSTNAMEREMOTE'] = self.remote_hostname
-        return ' '.join("{0}={1}".format(k, self.data[k]) for k in sorted(self.data.keys()) if self.data[k] is not None).strip()
-
-    def assert_monotonic_order(self):
-        keys_in_order = ['START', 'SOCKET', 'CONNECT', 'NEGOTIATE', 'REQUEST', 'RESPONSE', \
-             'DATAREQUEST', 'DATARESPONSE', 'DATAPERC10', 'DATAPERC20', 'DATAPERC30', 'DATAPERC40', \
-             'DATAPERC50', 'DATAPERC60', 'DATAPERC70', 'DATAPERC80', 'DATAPERC90', 'DATACOMPLETE']
-        prev_ts = 0.0
-        for k in keys_in_order:
-            ts = float(self.data[k])
-            if ts < prev_ts:
-                logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.id, k, ts, prev_ts))
-                return False
-            prev_ts = ts
+        self.handle_torctl_event(event, arrival_dt)
         return True
 
-class TorPerfParser(Parser):
+    def parse(self, source, do_simple=True):
+        source.open()
+        for line in source:
+            # ignore line parsing errors
+            try:
+                if self.__parse_line(line, do_simple):
+                    continue
+                else:
+                    break
+            except:
+                continue
+        source.close()
 
-    def __init__(self, sources, name=None):
-        self.sources = sources
-        self.name = name
-        self.transfers = {}
-        self.sizes = {}
-        self.first_complete_dt = None
+    def get_data(self):
+        return {'streams':{}, 'circuits':{}}  # {'streams':self.streams, 'streams_summary': self.transfers_summary}
 
-    def parse(self):
-        for s in self.sources:
-            s.open()
-            for line in s:
-                try:
-                    if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
-                        self.name = line.strip().split()[11].split('.')[0]
-
-                    # parse out torperf stats
-                    is_new, is_status, is_complete, is_torctlmsg = False, False, False, False
-                    if re.search("state\sCOMMAND\sto\sstate\sRESPONSE", line) is not None: is_new = True
-                    elif re.search("transfer-status", line) is not None: is_status = True
-                    elif re.search("transfer-complete", line) is not None: is_complete = True
-                    elif re.search("\s650\s", line) is not None: is_torctlmsg = True
-
-                    if is_new:
-                        # another run of tgen starts the id over counting up from 1
-                        # if a prev transfer with the same id did not complete, we can be sure it never will
-                        transfer_str = line.strip().split()[7]
-                        splitchar = ',' if ',' in transfer_str else '-'
-                        tid = int(transfer_str.strip('()').split(splitchar)[0])
-                        if tid in self.transfers: self.transfers.pop(tid)
-
-                    if is_status or is_complete:
-                        parts = line.strip().split()
-                        unix_ts, transport_str, transfer_str, status = float(parts[2]), parts[8], parts[10], parts[13]
-                        downloaded, filesize = [int(i) for i in status.split('=')[1].split('/')]
-
-                        transfer_parts = transfer_str.strip('()').split(',' if ',' in transfer_str else '-')
-                        tid = int(transfer_parts[0])
-
-                        # create if needed
-                        if tid not in self.transfers:
-                            transport_parts = transport_str.strip('()').split(',' if ',' in transport_str else '-')
-                            endpoint_local, endpoint_remote = transport_parts[2], transport_parts[3]
-                            hostname_local, hostname_remote = transfer_parts[1], transfer_parts[4]
-                            self.transfers[tid] = TorPerfEntry(tid, endpoint_local, endpoint_remote, hostname_local, hostname_remote, filesize)
-
-                        # stats to add during download
-                        self.transfers[tid].update_progress(unix_ts, downloaded)
-
-                        # stats to add when finished
-                        if is_complete:
-                            total_read, total_write = int(parts[11].split('=')[1]), int(parts[12].split('=')[1])
-                            self.transfers[tid].set('READBYTES', total_read)
-                            self.transfers[tid].set('WRITEBYTES', total_write)
-
-                            def keyval_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000.0
-                            def ts_to_str(ts): return"{0:.02f}".format(ts)
-
-                            s_to_cksum = keyval_to_secs(parts[25])
-                            start_ts = unix_ts - s_to_cksum
-
-                            self.transfers[tid].set('START', ts_to_str(start_ts))
-                            self.transfers[tid].set('SOCKET', ts_to_str(start_ts + keyval_to_secs(parts[15])))
-                            self.transfers[tid].set('CONNECT', ts_to_str(start_ts + keyval_to_secs(parts[16])))
-                            self.transfers[tid].set('NEGOTIATE', ts_to_str(start_ts + keyval_to_secs(parts[18])))
-                            self.transfers[tid].set('REQUEST', ts_to_str(start_ts + keyval_to_secs(parts[19])))
-                            self.transfers[tid].set('RESPONSE', ts_to_str(start_ts + keyval_to_secs(parts[20])))
-                            self.transfers[tid].set('DATAREQUEST', ts_to_str(start_ts + keyval_to_secs(parts[21])))
-                            self.transfers[tid].set('DATARESPONSE', ts_to_str(start_ts + keyval_to_secs(parts[22])))
-                            self.transfers[tid].set('DATACOMPLETE', ts_to_str(unix_ts))
-
-                            if len(self.sizes) == 0: self.first_complete_dt = datetime.datetime.fromtimestamp(unix_ts)
-                            if filesize not in self.sizes: self.sizes[filesize] = []
-
-                            # make sure the timestamps are in order, if not, we catch the error
-                            # and wont add this entry to the completed downloads
-                            if self.transfers[tid].assert_monotonic_order():
-                                self.sizes[filesize].append(self.transfers[tid])
-                                self.transfers.pop(tid)
-
-                    if is_torctlmsg:
-                        # parse with stem
-                        raw_event_str = line[line.index("650 "):]
-                        # msg = ControlMessage.from_str(raw_event_str)
-                        # convert('EVENT', msg)
-
-                        # do something with the new ControlMessage object
-                except:
-                    continue  # probably a line overwrite error
-            s.close()
-
-    def merge(self, parsers):
-        # merging multiple parsers is not supported for torperf
-        return None
-
-    def export_torperf_files(self, output_prefix=os.getcwd(), compress=True):
-        if not os.path.exists(output_prefix): os.makedirs(output_prefix)
-
-        if self.name is None: self.name = gethostname().split('.')[0]
-
-        # the utc datetime corresponding to when the first download completed that we parsed
-        d = self.first_complete_dt
-        datestr = "{0:04d}-{1:02d}-{2:02d}".format(d.year, d.month, d.day) if d is not None else "0000-00-00"
-
-        for size_bytes in self.sizes:
-            l = self.sizes[size_bytes]
-            filepath = "{0}/{1}-{2}-{3}.tpf".format(output_prefix, self.name, size_bytes, datestr)
-            should_append = os.path.exists(filepath) and not compress
-            output = util.FileWritable(filepath, do_compress=compress)
-            output.open()
-            if not should_append: output.write("@type torperf 1.0\r\n")
-            for entry in l:
-                entry.set('SOURCE', self.name)
-                output.write("{0}\r\n".format(entry.to_torperf_string()))
-            output.close()
-
+    def get_name(self):
+        return self.name
