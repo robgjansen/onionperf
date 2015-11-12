@@ -94,7 +94,7 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
 
         # setup the next expiration time (midnight tonight)
         if next_midnight is None:
-            next_midnight = datetime(utcnow.year, utcnow.month, utcnow.day, 23, 59, 59)
+            next_midnight = datetime.datetime(utcnow.year, utcnow.month, utcnow.day, 23, 59, 59)
             # make sure we are not already past the above time today
             if (next_midnight - utcnow).total_seconds() < 0:
                 next_midnight -= datetime.timedelta(1)  # subtract 1 day
