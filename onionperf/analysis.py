@@ -148,9 +148,9 @@ class Analysis(object):
                     d['DATARESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['response'])
 
                     # set DATAPERC[10,20,...,90]
-                    for decile in sorted(xfer_db['elapsed_seconds']['payload'].keys()):
-                        if xfer_db['elapsed_seconds']['payload'][decile] is not None:
-                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload'][decile])
+                    for decile in sorted(xfer_db['elapsed_seconds']['payload_progress'].keys()):
+                        if xfer_db['elapsed_seconds']['payload_progress'][decile] is not None:
+                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
 
                     d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
 
@@ -259,14 +259,14 @@ class TransferCompleteEvent(TransferStatusEvent):
         super(TransferCompleteEvent, self).__init__(line)
         self.is_complete = True
 
-        def keyval_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000.0
+        def keyval_usecs_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000000.0
 
         prev_elapsed = 0.0
         # match up self.unconsumed_parts[0:11] with the events in the transfer_steps enum
         for k in ['socket_create', 'socket_connect', 'proxy_init', 'proxy_choice', 'proxy_request',
                   'proxy_response', 'command', 'response', 'first_byte', 'last_byte', 'checksum']:
             # parse out the elapsed time value
-            self.elapsed_seconds.setdefault(k, keyval_to_secs(self.unconsumed_parts[len(self.elapsed_seconds)]))
+            self.elapsed_seconds.setdefault(k, keyval_usecs_to_secs(self.unconsumed_parts[len(self.elapsed_seconds)]))
 
             # make sure the elapsed times are monotonically increasing
             next_elapsed = self.elapsed_seconds[k]
@@ -307,7 +307,8 @@ class Transfer(object):
         if e is None or not e.is_complete:
             return None
         d = e.__dict__
-        d['elapsed_seconds']['payload'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress}
+        del(d['unix_ts'])  # duplicated in 'unix_ts_end'
+        d['elapsed_seconds']['payload_progress'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress}
         return d
 
 class Parser(object):
