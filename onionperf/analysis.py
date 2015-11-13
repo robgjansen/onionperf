@@ -112,10 +112,13 @@ class Analysis(object):
 
                 logging.info("saving analysis results to {0}".format(filepath))
 
+                # if the file exists, try to append to it
+                # this needs to be checked before opening the file
+                should_append = os.path.exists(filepath) and not do_compress
+
                 output = util.FileWritable(filepath, do_compress=do_compress)
                 output.open()
 
-                should_append = os.path.exists(filepath) and not do_compress
                 if not should_append:
                     output.write("@type torperf 1.0\r\n")
 
