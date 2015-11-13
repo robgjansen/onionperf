@@ -150,7 +150,7 @@ class Analysis(object):
                     # set DATAPERC[10,20,...,90]
                     for decile in sorted(xfer_db['elapsed_seconds']['payload'].keys()):
                         if xfer_db['elapsed_seconds']['payload'][decile] is not None:
-                            d['DATAPERC{0}'.format(int(decile * 100))] = xfer_db['elapsed_seconds']['payload'][decile]
+                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload'][decile])
 
                     d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
 
