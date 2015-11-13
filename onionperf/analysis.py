@@ -221,7 +221,7 @@ class TransferStatusEvent(object):
         self.is_complete = False
 
         parts = line.strip().split()
-        self.unix_ts = util.timestamp_to_seconds(parts[2])
+        self.unix_ts_end = util.timestamp_to_seconds(parts[2])
 
         transport_parts = parts[8].split(',' if ',' in parts[8] else '-')
         self.endpoint_local = transport_parts[2]
@@ -238,7 +238,7 @@ class TransferStatusEvent(object):
 
         # for id, combine the time with the transfer num; this is unique for each node,
         # as long as the node was running tgen without restarting for 100 seconds or longer
-        # #self.transfer_id = "{0}-{1}".format(round(self.unix_ts, -2), transfer_num)
+        # #self.transfer_id = "{0}-{1}".format(round(self.unix_ts_end, -2), transfer_num)
         self.transfer_id = transfer_num
 
         self.total_bytes_read = int(parts[11].split('=')[1])
@@ -275,8 +275,7 @@ class TransferCompleteEvent(TransferStatusEvent):
                 return None
             prev_elapsed = next_elapsed
 
-        self.unix_ts_end = self.unix_ts
-        self.unix_ts_start = self.unix_ts - self.elapsed_seconds['checksum']
+        self.unix_ts_start = self.unix_ts_end - self.elapsed_seconds['checksum']
         del(self.unconsumed_parts)
 
 class TransferSuccessEvent(TransferCompleteEvent):
@@ -299,7 +298,7 @@ class Transfer(object):
         progress_frac = float(status_event.payload_bytes_status) / float(status_event.filesize_bytes)
         for decile in sorted(self.payload_progress.keys()):
             if progress_frac >= decile and self.payload_progress[decile] is None:
-                self.payload_progress[decile] = status_event.unix_ts
+                self.payload_progress[decile] = status_event.unix_ts_end
         self.last_event = status_event
 
     def get_data(self):
@@ -307,7 +306,6 @@ class Transfer(object):
         if e is None or not e.is_complete:
             return None
         d = e.__dict__
-        del(d['unix_ts'])  # duplicated in 'unix_ts_end'
         d['elapsed_seconds']['payload_progress'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress}
         return d
 
@@ -357,7 +355,7 @@ class TGenParser(Parser):
                 self.transfers[xfer.id] = xfer.get_data()
                 self.state.pop(complete.transfer_id)
 
-            filesize, second = complete.filesize_bytes, int(complete.unix_ts)
+            filesize, second = complete.filesize_bytes, int(complete.unix_ts_end)
             fb_secs = complete.elapsed_seconds['first_byte'] - complete.elapsed_seconds['command']
             lb_secs = complete.elapsed_seconds['last_byte'] - complete.elapsed_seconds['command']
 
@@ -375,7 +373,7 @@ class TGenParser(Parser):
                 self.transfers[xfer.id] = xfer.get_data()
                 self.state.pop(error.transfer_id)
 
-            err_code, filesize, second = error.error_code, error.filesize_bytes, int(error.unix_ts)
+            err_code, filesize, second = error.error_code, error.filesize_bytes, int(error.unix_ts_end)
 
             err_list = self.transfers_summary['errors'].setdefault(err_code, {}).setdefault(second, [])
             err_list.append(filesize)
