@@ -14,6 +14,7 @@ import stem, stem.response, stem.response.events
 from stem.response import ControlMessage, convert
 import util
 from socket import gethostname
+from __builtin__ import True
 
 class Analysis(object):
 
@@ -123,6 +124,15 @@ class Analysis(object):
                     output.write("@type torperf 1.0\r\n")
 
                 for xfer_db in xfers_by_filesize[filesize]:
+                    # sanity checks
+                    is_missing_keys = False
+                    for key in ['proxy_choice', 'proxy_request', 'proxy_response']:
+                        if key not in xfer_db['elapsed_seconds']:
+                            logging.warning("torperf requires time key '{0}', skipping transfer '{1}'".format(key, xfer_db['transfer_id']))
+                            is_missing_keys = True
+                    if is_missing_keys:
+                        continue
+
                     d = {}
 
                     d['SOURCE'] = nickname
@@ -223,23 +233,23 @@ class TransferStatusEvent(object):
         parts = line.strip().split()
         self.unix_ts_end = util.timestamp_to_seconds(parts[2])
 
-        transport_parts = parts[8].split(',' if ',' in parts[8] else '-')
+        transport_parts = parts[8].split(',')
         self.endpoint_local = transport_parts[2]
         self.endpoint_proxy = transport_parts[3]
         self.endpoint_remote = transport_parts[4]
 
-        transfer_parts = parts[10].split(',' if ',' in parts[10] else '-')
-        transfer_num = int(transfer_parts[0])
-        self.hostname_local = transfer_parts[1]
-        self.method = transfer_parts[2]  # 'GET' or 'PUT'
-        self.filesize_bytes = int(transfer_parts[3])
-        self.hostname_remote = transfer_parts[4]
-        self.error_code = transfer_parts[7].split('=')[1]
+        transfer_parts = parts[10].split(',')
 
         # for id, combine the time with the transfer num; this is unique for each node,
         # as long as the node was running tgen without restarting for 100 seconds or longer
         # #self.transfer_id = "{0}-{1}".format(round(self.unix_ts_end, -2), transfer_num)
-        self.transfer_id = transfer_num
+        self.transfer_id = "{0}:{1}".format(transfer_parts[0], transfer_parts[1])  # id:count
+
+        self.hostname_local = transfer_parts[2]
+        self.method = transfer_parts[3]  # 'GET' or 'PUT'
+        self.filesize_bytes = int(transfer_parts[4])
+        self.hostname_remote = transfer_parts[5]
+        self.error_code = transfer_parts[8].split('=')[1]
 
         self.total_bytes_read = int(parts[11].split('=')[1])
         self.total_bytes_write = int(parts[12].split('=')[1])
@@ -259,21 +269,25 @@ class TransferCompleteEvent(TransferStatusEvent):
         super(TransferCompleteEvent, self).__init__(line)
         self.is_complete = True
 
-        def keyval_usecs_to_secs(keyval): return float(int(keyval.split('=')[1])) / 1000000.0
-
-        prev_elapsed = 0.0
+        prev_elapsed, i = 0.0, 0
         # match up self.unconsumed_parts[0:11] with the events in the transfer_steps enum
         for k in ['socket_create', 'socket_connect', 'proxy_init', 'proxy_choice', 'proxy_request',
                   'proxy_response', 'command', 'response', 'first_byte', 'last_byte', 'checksum']:
             # parse out the elapsed time value
-            self.elapsed_seconds.setdefault(k, keyval_usecs_to_secs(self.unconsumed_parts[len(self.elapsed_seconds)]))
+            keyval = self.unconsumed_parts[i]
+            i += 1
 
-            # make sure the elapsed times are monotonically increasing
-            next_elapsed = self.elapsed_seconds[k]
-            if next_elapsed < prev_elapsed:
-                logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.id, k, next_elapsed, prev_elapsed))
-                return None
-            prev_elapsed = next_elapsed
+            val = float(int(keyval.split('=')[1]))
+            if val >= 0.0:
+                seconds = val / 1000000.0  # usecs to secs
+                self.elapsed_seconds.setdefault(k, seconds)
+
+                # make sure the elapsed times are monotonically increasing
+                next_elapsed = self.elapsed_seconds[k]
+                if next_elapsed < prev_elapsed:
+                    logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.transfer_id, k, next_elapsed, prev_elapsed))
+                    return None
+                prev_elapsed = next_elapsed
 
         self.unix_ts_start = self.unix_ts_end - self.elapsed_seconds['checksum']
         del(self.unconsumed_parts)
@@ -337,7 +351,8 @@ class TGenParser(Parser):
             # another run of tgen starts the id over counting up from 1
             # if a prev transfer with the same id did not complete, we can be sure it never will
             parts = line.strip().split()
-            transfer_id = int(parts[7].strip().split(',' if ',' in parts[7] else '-')[0])
+            transfer_parts = parts[7].strip().split(',')
+            transfer_id = "{0}:{1}".format(transfer_parts[0], transfer_parts[1])  # id:count
             if transfer_id in self.state:
                 self.state.pop(transfer_id)
 
