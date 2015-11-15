@@ -269,7 +269,8 @@ class TransferCompleteEvent(TransferStatusEvent):
         super(TransferCompleteEvent, self).__init__(line)
         self.is_complete = True
 
-        prev_elapsed, i = 0.0, 0
+        i = 0
+        elapsed_seconds = 0.0
         # match up self.unconsumed_parts[0:11] with the events in the transfer_steps enum
         for k in ['socket_create', 'socket_connect', 'proxy_init', 'proxy_choice', 'proxy_request',
                   'proxy_response', 'command', 'response', 'first_byte', 'last_byte', 'checksum']:
@@ -279,17 +280,10 @@ class TransferCompleteEvent(TransferStatusEvent):
 
             val = float(int(keyval.split('=')[1]))
             if val >= 0.0:
-                seconds = val / 1000000.0  # usecs to secs
-                self.elapsed_seconds.setdefault(k, seconds)
+                elapsed_seconds = val / 1000000.0  # usecs to secs
+                self.elapsed_seconds.setdefault(k, elapsed_seconds)
 
-                # make sure the elapsed times are monotonically increasing
-                next_elapsed = self.elapsed_seconds[k]
-                if next_elapsed < prev_elapsed:
-                    logging.warning("monotonic time error for entry {0} key {1}: next {2} is not >= prev {3}".format(self.transfer_id, k, next_elapsed, prev_elapsed))
-                    return None
-                prev_elapsed = next_elapsed
-
-        self.unix_ts_start = self.unix_ts_end - self.elapsed_seconds['checksum']
+        self.unix_ts_start = self.unix_ts_end - elapsed_seconds
         del(self.unconsumed_parts)
 
 class TransferSuccessEvent(TransferCompleteEvent):
