@@ -314,7 +314,7 @@ class Transfer(object):
         if e is None or not e.is_complete:
             return None
         d = e.__dict__
-        d['elapsed_seconds']['payload_progress'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress}
+        d['elapsed_seconds']['payload_progress'] = {decile: self.payload_progress[decile] - e.unix_ts_start for decile in self.payload_progress if self.payload_progress[decile] is not None}
         return d
 
 class Parser(object):
