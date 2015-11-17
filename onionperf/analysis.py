@@ -32,7 +32,7 @@ class Analysis(object):
         self.torctl_filepaths.append(filepath)
 
     def analyze(self, do_simple=True):
-        for (filepaths, parser) in [(self.tgen_filepaths, TGenParser()), (self.torctl_filepaths, TorCtlParser())]:
+        for (filepaths, parser, json_db_key) in [(self.tgen_filepaths, TGenParser(), 'tgen'), (self.torctl_filepaths, TorCtlParser(), 'tor')]:
             if len(filepaths) > 0:
                 for filepath in filepaths:
                     logging.info("parsing log file at {0}".format(filepath))
@@ -41,7 +41,7 @@ class Analysis(object):
                 n = self.nickname
                 if n is None:
                     n = parsed_name if parsed_name is not None else self.hostname
-                self.json_db['data'].setdefault(n, {}).setdefault('tgen', parser.get_data())
+                self.json_db['data'].setdefault(n, {}).setdefault(json_db_key, parser.get_data())
 
     def merge(self, analysis):
         for nickname in analysis.json_db['data']:
@@ -107,6 +107,13 @@ class Analysis(object):
             xfers_by_filesize = {}
             for xfer_db in self.json_db['data'][nickname]['tgen']['transfers'].values():
                 xfers_by_filesize.setdefault(xfer_db['filesize_bytes'], []).append(xfer_db)
+                
+            streams_by_srcport = {}
+            for streams_db in self.json_db['data'][nickname]['tor']['streams'].values():
+                if 'source' in streams_db:
+                    srcport = int(streams_db['source'].split(':')[1])
+                    streams_by_srcport[srcport] = streams_db
+            circuits = self.json_db['data'][nickname]['tor']['circuits']
 
             for filesize in xfers_by_filesize:
                 filepath = "{0}/{1}-{2}-{3}.tpf{4}".format(output_prefix, nickname, filesize, datestr, '.xz' if do_compress else '')
@@ -163,16 +170,25 @@ class Analysis(object):
                             d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
 
                     d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
+                    # could be ioerror or timeout or etc, but i dont think torperf distinguishes these
+                    d['DIDTIMEOUT'] = 1 if xfer_db['is_error'] is True else 0
 
-                    d['LAUNCH'] = None
-                    d['PATH'] = None
-                    d['BUILDTIMES'] = None
-                    d['QUANTILE'] = None
-                    d['TIMEOUT'] = None
-                    d['CIRC_ID'] = None
-                    d['USED_AT'] = None
-                    d['USED_BY'] = None
-                    d['DIDTIMEOUT'] = None
+                    # now get the tor parts
+                    srcport = int(xfer_db['endpoint_local'].split(':')[2])
+                    if srcport in streams_by_srcport:
+                        stream_db = streams_by_srcport[srcport]
+                        circid = int(stream_db['circuit_id'])
+                        if circid in circuits:
+                            circuit_db = circuits[circid]
+
+                            d['LAUNCH'] = circuit_db['unix_ts_start']
+                            d['PATH'] = ','.join([item[0].split('~')[0] for item in circuit_db['path']])
+                            d['BUILDTIMES'] = ','.join([str(item[1]) for item in circuit_db['path']])
+                            d['TIMEOUT'] = circuit_db['build_timeout'] if 'build_timeout' in circuit_db else None
+                            d['QUANTILE'] = circuit_db['build_quantile'] if 'build_quantile' in circuit_db else None
+                            d['CIRC_ID'] = circid
+                            d['USED_AT'] = stream_db['unix_ts_end']
+                            d['USED_BY'] = int(stream_db['stream_id'])
 
                     output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
                     output.write("{0}\r\n".format(output_str))
@@ -410,84 +426,246 @@ class TGenParser(Parser):
 
 class Stream(object):
     def __init__(self, sid):
-        self.id = sid
-        self.circ_id = None
-        self.events = {}
+        self.stream_id = sid
+        self.circuit_id = None
+        self.unix_ts_start = None
+        self.unix_ts_end = None
+        self.failure_reason_local = None
+        self.failure_reason_remote = None
+        self.source = None
+        self.target = None
+        self.elapsed_seconds = []
+        self.last_purpose = None
 
-    def add_event(self, event, circ_id, arrived_at):
-        event_str = str(event)
-        if event_str not in self.events:
-            self.events[event_str] = arrived_at
-        if circ_id:
-            self.circ_id = circ_id
+    def add_event(self, purpose, status, arrived_at):
+        if purpose is not None:
+            self.last_purpose = purpose
+        key = "{0}:{1}".format(self.last_purpose, status)
+        self.elapsed_seconds.append([key, arrived_at])
 
-    def get_event(self, event):
-        try:
-            return self.events[event]
-        except KeyError:
+    def set_circ_id(self, circ_id):
+        if circ_id is not None:
+            self.circuit_id = circ_id
+
+    def set_start_time(self, unix_ts):
+        if self.unix_ts_start is None:
+            self.unix_ts_start = unix_ts
+
+    def set_end_time(self, unix_ts):
+        self.unix_ts_end = unix_ts
+
+    def set_local_failure(self, reason):
+        self.failure_reason_local = reason
+
+    def set_remote_failure(self, reason):
+        self.failure_reason_remote = reason
+
+    def set_target(self, target):
+        self.target = target
+
+    def set_source(self, source):
+        self.source = source
+
+    def get_data(self):
+        if self.unix_ts_start is None or self.unix_ts_end is None:
             return None
+        d = self.__dict__
+        for item in d['elapsed_seconds']:
+            item[1] = item[1] - self.unix_ts_start
+        del(d['last_purpose'])
+        if d['failure_reason_local'] is None: del(d['failure_reason_local'])
+        if d['failure_reason_remote'] is None: del(d['failure_reason_remote'])
+        if d['source'] is None: del(d['source'])
+        if d['target'] is None: del(d['target'])
+        return d
 
     def __str__(self):
         return('stream id=%d circ_id=%s %s' % (self.id, self.circ_id,
                ' '.join(['%s=%s' % (event, arrived_at)
-               for (event, arrived_at) in self.events.items()])))
+               for (event, arrived_at) in sorted(self.elapsed_seconds, key=lambda item: item[1])])))
 
 class Circuit(object):
     def __init__(self, cid):
-        self.id = cid
-        self.events = {}
+        self.circuit_id = cid
+        self.unix_ts_start = None
+        self.unix_ts_end = None
+        self.failure_reason_local = None
+        self.failure_reason_remote = None
+        self.buildtime_seconds = None
+        self.build_timeout = None
+        self.build_quantile = None
+        self.elapsed_seconds = []
+        self.path = []
 
     def add_event(self, event, arrived_at):
-        event_str = str(event)
-        if event_str not in self.events:
-            self.events[event_str] = arrived_at
+        self.elapsed_seconds.append([str(event), arrived_at])
 
-    def get_event(self, event):
-        try:
-            return self.events[event]
-        except KeyError:
+    def add_hop(self, hop, arrived_at):
+        self.path.append(["${0}~{1}".format(hop[0], hop[1]), arrived_at])
+
+    def set_launched(self, unix_ts, build_timeout, build_quantile):
+        if self.unix_ts_start is None:
+            self.unix_ts_start = unix_ts
+        self.build_timeout = build_timeout
+        self.build_quantile = build_quantile
+
+    def set_end_time(self, unix_ts):
+        self.unix_ts_end = unix_ts
+
+    def set_local_failure(self, reason):
+        self.failure_reason_local = reason
+
+    def set_remote_failure(self, reason):
+        self.failure_reason_remote = reason
+
+    def set_build_time(self, unix_ts):
+        if self.buildtime_seconds is None:
+            self.buildtime_seconds = unix_ts
+
+    def get_data(self):
+        if self.unix_ts_start is None or self.unix_ts_end is None:
             return None
+        d = self.__dict__
+        for item in d['elapsed_seconds']:
+            item[1] = item[1] - self.unix_ts_start
+        for item in d['path']:
+            item[1] = item[1] - self.unix_ts_start
+        if d['buildtime_seconds'] is None:
+            del(d['buildtime_seconds'])
+        else:
+            d['buildtime_seconds'] = self.buildtime_seconds - self.unix_ts_start
+        if len(d['path']) == 0: del(d['path'])
+        if d['failure_reason_local'] is None: del(d['failure_reason_local'])
+        if d['failure_reason_remote'] is None: del(d['failure_reason_remote'])
+        if d['build_timeout'] is None: del(d['build_timeout'])
+        if d['build_quantile'] is None: del(d['build_quantile'])
+        return d
 
     def __str__(self):
         return('circuit id=%d %s' % (self.id, ' '.join(['%s=%s' %
                (event, arrived_at) for (event, arrived_at) in
-               self.events.items()])))
+               sorted(self.elapsed_seconds, key=lambda item: item[1])])))
 
 class TorCtlParser(Parser):
 
     def __init__(self):
-        self.streams = {}
+        self.do_simple = True
+        self.bandwidth_summary = {'bytes_read':{}, 'bytes_written':{}}
+        self.circuits_state = {}
         self.circuits = {}
-        self.data = {'bytes_read':{}, 'bytes_written':{}}
+        self.circuits_summary = {'buildtimes':[], 'lifetimes':[]}
+        self.streams_state = {}
+        self.streams = {}
+        self.streams_summary = {'lifetimes':{}}
         self.name = None
         self.boot_succeeded = False
-        self.total_read = 0
-        self.total_write = 0
+        self.build_timeout_last = None
+        self.build_quantile_last = None
 
-    def __handle_circuit_general(self, event, arrival_dt):
+    def __handle_circuit(self, event, arrival_dt):
+        # first make sure we have a circuit object
         cid = int(event.id)
-        self.circuits.setdefault(cid, Circuit(cid)).add_event(event.state, arrival_dt)
+        circ = self.circuits_state.setdefault(cid, Circuit(cid))
+        is_hs_circ = True if event.purpose in (stem.CircPurpose.HS_CLIENT_INTRO, stem.CircPurpose.HS_CLIENT_REND, \
+                                   stem.CircPurpose.HS_SERVICE_INTRO, stem.CircPurpose.HS_SERVICE_REND) else False
 
-    def __handle_circuit_hs(self, event, arrival_dt):
-        cid = int(event.id)
-        self.__handle_circuit_general(event, arrival_dt)
-        self.circuits.setdefault(cid, Circuit(cid)).add_event(event.hs_state, arrival_dt)
+        # now figure out what status we want to track
+        key = None
+        if isinstance(event, stem.response.events.CircuitEvent):
+            if event.status == stem.CircStatus.LAUNCHED:
+                circ.set_launched(arrival_dt, self.build_timeout_last, self.build_quantile_last)
+
+            key = "{0}:{1}".format(event.purpose, event.status)
+            circ.add_event(key, arrival_dt)
+
+            if event.status == stem.CircStatus.EXTENDED:
+                circ.add_hop(event.path[-1], arrival_dt)
+            elif event.status == stem.CircStatus.FAILED:
+                circ.set_local_failure(event.reason)
+                if event.remote_reason is not None and event.remote_reason != '':
+                    circ.set_remote_failure(event.remote_reason)
+            elif event.status == stem.CircStatus.BUILT:
+                circ.set_build_time(arrival_dt)
+                if is_hs_circ:
+                    key = event.hs_state
+                    if event.rend_query is not None and event.rend_query != '':
+                        key = "{0}:{1}".format(key, event.rend_query)
+                    circ.add_event(key, arrival_dt)
+
+            if event.status == stem.CircStatus.CLOSED or event.status == stem.CircStatus.FAILED:
+                circ.set_end_time(arrival_dt)
+                started, built, ended = circ.unix_ts_start, circ.buildtime_seconds, circ.unix_ts_end
+
+                data = circ.get_data()
+                if data is not None:
+                    if built is not None and started is not None and len(data['path']) == 3:
+                        self.circuits_summary['buildtimes'].append(built - started)
+                    if ended is not None and started is not None:
+                        self.circuits_summary['lifetimes'].append(ended - started)
+                    if not self.do_simple:
+                        self.circuits[cid] = data
+                self.circuits_state.pop(cid)
+
+        elif not self.do_simple and isinstance(event, stem.response.events.CircMinorEvent):
+            if event.purpose != event.old_purpose or event.event != stem.CircEvent.PURPOSE_CHANGED:
+                key = "{0}:{1}".format(event.event, event.purpose)
+                circ.add_event(key, arrival_dt)
+
+            if is_hs_circ:
+                key = event.hs_state
+                if event.rend_query is not None and event.rend_query != '':
+                    key = "{0}:{1}".format(key, event.rend_query)
+                circ.add_event(key, arrival_dt)
 
     def __handle_stream(self, event, arrival_dt):
         sid = int(event.id)
-        self.streams.setdefault(sid, Stream(sid)).add_event(event.status, event.circ_id, arrival_dt)
+        strm = self.streams_state.setdefault(sid, Stream(sid))
+
+        if event.circ_id is not None:
+            strm.set_circ_id(event.circ_id)
+
+        strm.add_event(event.purpose, event.status, arrival_dt)
+        strm.set_target(event.target)
+
+        if event.status == stem.StreamStatus.NEW or event.status == stem.StreamStatus.NEWRESOLVE:
+            strm.set_start_time(arrival_dt)
+            strm.set_source(event.source_addr)
+        elif event.status == stem.StreamStatus.FAILED:
+            strm.set_local_failure(event.reason)
+            if event.remote_reason is not None and event.remote_reason != '':
+                strm.set_remote_failure(event.remote_reason)
+
+        if event.status == stem.StreamStatus.CLOSED or event.status == stem.StreamStatus.FAILED:
+            strm.set_end_time(arrival_dt)
+            stream_type = strm.last_purpose
+            started, ended = strm.unix_ts_start, strm.unix_ts_end
+
+            data = strm.get_data()
+            if data is not None:
+                if not self.do_simple:
+                    self.streams[sid] = data
+                self.streams_summary['lifetimes'].setdefault(stream_type, []).append(ended - started)
+            self.streams_state.pop(sid)
+
+    def __handle_bw(self, event, arrival_dt):
+        self.bandwidth_summary['bytes_read'][arrival_dt] = event.read
+        self.bandwidth_summary['bytes_written'][arrival_dt] = event.written
+        
+    def __handle_buildtimeout(self, event, arrival_dt):
+        self.build_timeout_last = event.timeout
+        self.build_quantile_last = event.quantile
 
     def __handle_event(self, event, arrival_dt):
         if isinstance(event, (stem.response.events.CircuitEvent, stem.response.events.CircMinorEvent)):
-            if event.purpose is stem.CircPurpose.HS_CLIENT_GENERAL:
-                self.__handle_circuit_general(event, arrival_dt)
-            elif event.purpose in (stem.CircPurpose.HS_CLIENT_INTRO, stem.CircPurpose.HS_CLIENT_REND,
-                                   stem.CircPurpose.HS_SERVICE_INTRO, stem.CircPurpose.HS_SERVICE_REND):
-                self.__handle_circuit_hs(event, arrival_dt)
+            self.__handle_circuit(event, arrival_dt)
         elif isinstance(event, stem.response.events.StreamEvent):
             self.__handle_stream(event, arrival_dt)
+        elif isinstance(event, stem.response.events.BandwidthEvent):
+            self.__handle_bw(event, arrival_dt)
+        elif isinstance(event, stem.response.events.BuildTimeoutSetEvent):
+            self.__handle_buildtimeout(event, arrival_dt)
 
-    def __parse_line(self, line, do_simple):
+    def __parse_line(self, line):
         if not self.boot_succeeded:
             if re.search("Starting\storctl\sprogram\son\shost", line) is not None:
                 parts = line.strip().split()
@@ -499,35 +677,38 @@ class TorCtlParser(Parser):
             elif re.search("BOOTSTRAP", line) is not None and re.search("PROGRESS=100", line) is not None:
                 self.boot_succeeded = True
 
-        # parse with stem
-        timestamps, sep, raw_event_str = line.partition(" 650 ")
-        if sep == '':
-            return True
-
-        unix_ts = timestamps.strip().split()[2]
-        arrival_dt = datetime.datetime.fromtimestamp(unix_ts)
-
-        event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str.strip()))
-        convert('EVENT', event)
-
-        self.handle_torctl_event(event, arrival_dt)
+        if self.do_simple is False or (self.do_simple is True and re.search("650\sBW", line) is not None):
+            # parse with stem
+            timestamps, sep, raw_event_str = line.partition(" 650 ")
+            if sep == '':
+                return True
+            event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str))
+            convert('EVENT', event)
+    
+            # event.arrived_at is also available but at worse granularity
+            unix_ts = float(timestamps.strip().split()[2])
+            self.__handle_event(event, unix_ts)
         return True
 
     def parse(self, source, do_simple=True):
+        self.do_simple = do_simple
         source.open()
         for line in source:
             # ignore line parsing errors
             try:
-                if self.__parse_line(line, do_simple):
+                if self.__parse_line(line):
                     continue
                 else:
                     break
             except:
                 continue
         source.close()
+        print len(self.streams), len(self.circuits)
 
     def get_data(self):
-        return {'streams':{}, 'circuits':{}}  # {'streams':self.streams, 'streams_summary': self.transfers_summary}
+        return {'circuits': self.circuits, 'circuits_summary': self.circuits_summary,
+                'streams':self.streams, 'streams_summary': self.streams_summary,
+                'bw_summary': self.bandwidth_summary}
 
     def get_name(self):
         return self.name
