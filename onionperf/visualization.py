@@ -63,7 +63,8 @@ class Visualization(object):
 
 class TorVisualization(Visualization):
 
-    def plot_all(self, output_prefix):
+    def plot_all(self, output_prefix, relays_only=False):
+        self.relays_only = relays_only
         if len(self.datasets) > 0:
             prefix = output_prefix + '.' if output_prefix is not None else ''
             ts = time.strftime("%Y-%m-%d_%H:%M:%S")
@@ -78,14 +79,14 @@ class TorVisualization(Visualization):
         eachcdffig = pylab.figure()
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             tput = {}
             pertput = []
-            for node in d:
-                if 'relay' not in node and 'thority' not in node: continue
-                for tstr in d[node][direction]:
-                    mib = d[node][direction][tstr] / 1048576.0
+            for node in anal.get_nodes():
+                if self.relays_only and 'relay' not in node and 'thority' not in node: continue
+                d = anal.get_tor_bandwidth_summary(node, direction)
+                if d is None: continue
+                for tstr in d:
+                    mib = d[tstr] / 1048576.0
                     t = int(tstr)
                     if t not in tput: tput[t] = 0
                     tput[t] += mib
@@ -144,12 +145,12 @@ class TGenVisualization(Visualization):
             ts = time.strftime("%Y-%m-%d_%H:%M:%S")
             self.page = PdfPages("{0}tgen.onionperf.viz.{1}.pdf".format(prefix, ts))
             self.__plot_firstbyte()
-            self.__plot_byte_timeseries("firstbyte")
+            self.__plot_byte_timeseries("time_to_first_byte")
             self.__plot_lastbyte_all()
             self.__plot_lastbyte_median()
             self.__plot_lastbyte_mean()
             self.__plot_lastbyte_max()
-            self.__plot_byte_timeseries("lastbyte")
+            self.__plot_byte_timeseries("time_to_last_byte")
             self.__plot_downloads()
             self.__plot_downloads_timeseries()
             self.__plot_errors()
@@ -163,14 +164,14 @@ class TGenVisualization(Visualization):
         f = None
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             fb = []
-            for client in d:
-                if "firstbyte" in d[client]:
-                    for b in d[client]["firstbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_first_byte" in d:
+                    for b in d["time_to_first_byte"]:
                         if f is None: f = pylab.figure()
-                        for sec in d[client]["firstbyte"][b]: fb.extend(d[client]["firstbyte"][b][sec])
+                        for sec in d["time_to_first_byte"][b]: fb.extend(d["time_to_first_byte"][b][sec])
             if f is not None and len(fb) > 0:
                 x, y = getcdf(fb)
                 pylab.plot(x, y, lineformat, label=label)
@@ -187,16 +188,16 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             lb = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in lb: lb[bytes] = []
-                        for sec in d[client]["lastbyte"][b]: lb[bytes].extend(d[client]["lastbyte"][b][sec])
+                        for sec in d["time_to_last_byte"][b]: lb[bytes].extend(d["time_to_last_byte"][b][sec])
             for bytes in lb:
                 x, y = getcdf(lb[bytes])
                 pylab.figure(figs[bytes].number)
@@ -215,17 +216,17 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             lb = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in lb: lb[bytes] = []
                         client_lb_list = []
-                        for sec in d[client]["lastbyte"][b]: client_lb_list.extend(d[client]["lastbyte"][b][sec])
+                        for sec in d["time_to_last_byte"][b]: client_lb_list.extend(d["time_to_last_byte"][b][sec])
                         lb[bytes].append(numpy.median(client_lb_list))
             for bytes in lb:
                 x, y = getcdf(lb[bytes])
@@ -245,17 +246,17 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             lb = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in lb: lb[bytes] = []
                         client_lb_list = []
-                        for sec in d[client]["lastbyte"][b]: client_lb_list.extend(d[client]["lastbyte"][b][sec])
+                        for sec in d["time_to_last_byte"][b]: client_lb_list.extend(d["time_to_last_byte"][b][sec])
                         lb[bytes].append(numpy.mean(client_lb_list))
             for bytes in lb:
                 x, y = getcdf(lb[bytes])
@@ -275,17 +276,17 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             lb = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in lb: lb[bytes] = []
                         client_lb_list = []
-                        for sec in d[client]["lastbyte"][b]: client_lb_list.extend(d[client]["lastbyte"][b][sec])
+                        for sec in d["time_to_last_byte"][b]: client_lb_list.extend(d["time_to_last_byte"][b][sec])
                         lb[bytes].append(numpy.max(client_lb_list))
             for bytes in lb:
                 x, y = getcdf(lb[bytes])
@@ -301,22 +302,22 @@ class TGenVisualization(Visualization):
             self.page.savefig()
             pylab.close()
 
-    def __plot_byte_timeseries(self, bytekey="lastbyte"):
+    def __plot_byte_timeseries(self, bytekey="time_to_last_byte"):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             lb = {}
-            for client in d:
-                if bytekey in d[client]:
-                    for b in d[client][bytekey]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if bytekey in d:
+                    for b in d[bytekey]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in lb: lb[bytes] = {}
-                        for sec in d[client][bytekey][b]:
+                        for sec in d[bytekey][b]:
                             if sec not in lb[bytes]: lb[bytes][sec] = []
-                            lb[bytes][sec].extend(d[client][bytekey][b][sec])
+                            lb[bytes][sec].extend(d[bytekey][b][sec])
             for bytes in lb:
                 pylab.figure(figs[bytes].number)
                 x = [sec for sec in lb[bytes]]
@@ -328,7 +329,7 @@ class TGenVisualization(Visualization):
             pylab.figure(figs[bytes].number)
             pylab.xlabel("Tick (s)")
             pylab.ylabel("Download Time (s)")
-            pylab.title("mean time to download {0} of {1} bytes, all clients over time".format(bytekey, bytes))
+            pylab.title("mean time to download {0} of {1} bytes, all clients over time".format('first' if 'first' in bytekey else 'last', bytes))
             pylab.legend(loc="lower right")
             self.page.savefig()
             pylab.close()
@@ -337,17 +338,17 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             dls = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in dls: dls[bytes] = {}
                         if client not in dls[bytes]: dls[bytes][client] = 0
-                        for sec in d[client]["lastbyte"][b]: dls[bytes][client] += len(d[client]["lastbyte"][b][sec])
+                        for sec in d["time_to_last_byte"][b]: dls[bytes][client] += len(d["time_to_last_byte"][b][sec])
             for bytes in dls:
                 x, y = getcdf(dls[bytes].values(), shownpercentile=1.0)
                 pylab.figure(figs[bytes].number)
@@ -366,18 +367,18 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             dls = {}
-            for client in d:
-                if "lastbyte" in d[client]:
-                    for b in d[client]["lastbyte"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "time_to_last_byte" in d:
+                    for b in d["time_to_last_byte"]:
                         bytes = int(b)
                         if bytes not in figs: figs[bytes] = pylab.figure()
                         if bytes not in dls: dls[bytes] = {}
-                        for sec in d[client]["lastbyte"][b]:
+                        for sec in d["time_to_last_byte"][b]:
                             if sec not in dls[bytes]: dls[bytes][sec] = 0
-                            dls[bytes][sec] += len(d[client]["lastbyte"][b][sec])
+                            dls[bytes][sec] += len(d["time_to_last_byte"][b][sec])
             for bytes in dls:
                 pylab.figure(figs[bytes].number)
                 x = [sec for sec in dls[bytes]]
@@ -398,16 +399,16 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             dls = {}
-            for client in d:
-                if "errors" in d[client]:
-                    for code in d[client]["errors"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "errors" in d:
+                    for code in d["errors"]:
                         if code not in figs: figs[code] = pylab.figure()
                         if code not in dls: dls[code] = {}
                         if client not in dls[code]: dls[code][client] = 0
-                        for sec in d[client]["errors"][code]: dls[code][client] += len(d[client]["errors"][code][sec])
+                        for sec in d["errors"][code]: dls[code][client] += len(d["errors"][code][sec])
             for code in dls:
                 x, y = getcdf([dls[code][client] for client in dls[code]], shownpercentile=1.0)
                 pylab.figure(figs[code].number)
@@ -426,17 +427,17 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             dls = {}
-            for client in d:
-                if "errors" in d[client]:
-                    for code in d[client]["errors"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "errors" in d:
+                    for code in d["errors"]:
                         if code not in figs: figs[code] = pylab.figure()
                         if code not in dls: dls[code] = {}
-                        for sec in d[client]["errors"][code]:
+                        for sec in d["errors"][code]:
                             if sec not in dls[code]: dls[code][sec] = 0
-                            dls[code][sec] += len(d[client]["errors"][code][sec])
+                            dls[code][sec] += len(d["errors"][code][sec])
             for code in dls:
                 pylab.figure(figs[code].number)
                 x = [sec for sec in dls[code]]
@@ -457,16 +458,16 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             err = {}
-            for client in d:
-                if "errors" in d[client]:
-                    for code in d[client]["errors"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "errors" in d:
+                    for code in d["errors"]:
                         if code not in figs: figs[code] = pylab.figure()
                         if code not in err: err[code] = []
                         client_err_list = []
-                        for sec in d[client]["errors"][code]: client_err_list.extend(d[client]["errors"][code][sec])
+                        for sec in d["errors"][code]: client_err_list.extend(d["errors"][code][sec])
                         for b in client_err_list: err[code].append(int(b) / 1024.0)
             for code in err:
                 x, y = getcdf(err[code])
@@ -486,16 +487,16 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             err = {}
-            for client in d:
-                if "errors" in d[client]:
-                    for code in d[client]["errors"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "errors" in d:
+                    for code in d["errors"]:
                         if code not in figs: figs[code] = pylab.figure()
                         if code not in err: err[code] = []
                         client_err_list = []
-                        for sec in d[client]["errors"][code]: client_err_list.extend(d[client]["errors"][code][sec])
+                        for sec in d["errors"][code]: client_err_list.extend(d["errors"][code][sec])
                         err[code].append(numpy.median(client_err_list) / 1024.0)
             for code in err:
                 x, y = getcdf(err[code])
@@ -515,16 +516,16 @@ class TGenVisualization(Visualization):
         figs = {}
 
         for (anal, label, lineformat) in self.datasets:
-            assert anal.result is not None and 'nodes' in anal.result
-            d = anal.result['nodes']
             err = {}
-            for client in d:
-                if "errors" in d[client]:
-                    for code in d[client]["errors"]:
+            for client in anal.get_nodes():
+                d = anal.get_tgen_transfers_summary(client)
+                if d is None: continue
+                if "errors" in d:
+                    for code in d["errors"]:
                         if code not in figs: figs[code] = pylab.figure()
                         if code not in err: err[code] = []
                         client_err_list = []
-                        for sec in d[client]["errors"][code]: client_err_list.extend(d[client]["errors"][code][sec])
+                        for sec in d["errors"][code]: client_err_list.extend(d["errors"][code][sec])
                         err[code].append(numpy.mean(client_err_list) / 1024.0)
             for code in err:
                 x, y = getcdf(err[code])

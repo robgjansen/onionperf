@@ -30,6 +30,21 @@ class Analysis(object):
 
     def add_torctl_file(self, filepath):
         self.torctl_filepaths.append(filepath)
+        
+    def get_nodes(self):
+        return self.json_db['data'].keys()
+    
+    def get_tor_bandwidth_summary(self, node, direction):
+        try:
+            return self.json_db['data'][node]['tor']['bandwidth_summary'][direction]
+        except:
+            return None
+    
+    def get_tgen_transfers_summary(self, node):
+        try:
+            return self.json_db['data'][node]['tgen']['transfers_summary']
+        except:
+            return None
 
     def analyze(self, do_simple=True):
         for (filepaths, parser, json_db_key) in [(self.tgen_filepaths, TGenParser(), 'tgen'), (self.torctl_filepaths, TorCtlParser(), 'tor')]:
@@ -66,10 +81,12 @@ class Analysis(object):
 
     @classmethod
     def load(cls, filename="onionperf.analysis.json.xz", input_prefix=os.getcwd(), version=1.0):
-        filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(input_prefix, filename)))
+        filepath = os.path.abspath(os.path.expanduser("{0}".format(filename)))
         if not os.path.exists(filepath):
-            logging.warning("file does not exist at '{0}'".format(filepath))
-            return None
+            filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(input_prefix, filename)))
+            if not os.path.exists(filepath):
+                logging.warning("file does not exist at '{0}'".format(filepath))
+                return None
 
         logging.info("loading analysis results from {0}".format(filepath))
 
@@ -107,7 +124,7 @@ class Analysis(object):
             xfers_by_filesize = {}
             for xfer_db in self.json_db['data'][nickname]['tgen']['transfers'].values():
                 xfers_by_filesize.setdefault(xfer_db['filesize_bytes'], []).append(xfer_db)
-                
+
             streams_by_srcport = {}
             for streams_db in self.json_db['data'][nickname]['tor']['streams'].values():
                 if 'source' in streams_db:
@@ -648,9 +665,9 @@ class TorCtlParser(Parser):
             self.streams_state.pop(sid)
 
     def __handle_bw(self, event, arrival_dt):
-        self.bandwidth_summary['bytes_read'][arrival_dt] = event.read
-        self.bandwidth_summary['bytes_written'][arrival_dt] = event.written
-        
+        self.bandwidth_summary['bytes_read'][int(arrival_dt)] = event.read
+        self.bandwidth_summary['bytes_written'][int(arrival_dt)] = event.written
+
     def __handle_buildtimeout(self, event, arrival_dt):
         self.build_timeout_last = event.timeout
         self.build_quantile_last = event.quantile
@@ -684,7 +701,7 @@ class TorCtlParser(Parser):
                 return True
             event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str))
             convert('EVENT', event)
-    
+
             # event.arrived_at is also available but at worse granularity
             unix_ts = float(timestamps.strip().split()[2])
             self.__handle_event(event, unix_ts)
@@ -708,7 +725,7 @@ class TorCtlParser(Parser):
     def get_data(self):
         return {'circuits': self.circuits, 'circuits_summary': self.circuits_summary,
                 'streams':self.streams, 'streams_summary': self.streams_summary,
-                'bw_summary': self.bandwidth_summary}
+                'bandwidth_summary': self.bandwidth_summary}
 
     def get_name(self):
         return self.name
