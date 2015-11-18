@@ -144,7 +144,16 @@ class Measurement(object):
         self.hs_service_id = None
         self.twisted_docroot = None
 
-    def run(self, do_onion=True, do_inet=True):
+    def run(self, do_onion=True, do_inet=True, client_tgen_port=58888, client_tor_ctl_port=59050, client_tor_socks_port=59000,
+             server_tgen_port=80, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
+        '''
+        only `server_tgen_port` and `twistd_port` are "public" and need to be opened on the firewall.
+        all ports need to be unique though, and unique among multiple onionperf instances.
+        
+        here are some sane defaults:
+        client_tgen_port=58888, client_tor_ctl_port=59050, client_tor_socks_port=59000,
+        server_tgen_port=80, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080
+        '''
         self.threads = []
         self.done_event = threading.Event()
 
@@ -168,26 +177,26 @@ class Measurement(object):
             tgen_client_writable, torctl_client_writable = None, None
 
             if do_onion or do_inet:
-                general_writables.append(self.__start_tgen_server())
+                general_writables.append(self.__start_tgen_server(server_tgen_port))
 
             if do_onion:
-                tor_writable, torctl_writable = self.__start_tor_server()
+                tor_writable, torctl_writable = self.__start_tor_server(server_tor_ctl_port, server_tor_socks_port)
                 general_writables.append(tor_writable)
                 general_writables.append(torctl_writable)
 
             if do_onion or do_inet:
-                tor_writable, torctl_client_writable = self.__start_tor_client()
+                tor_writable, torctl_client_writable = self.__start_tor_client(client_tor_ctl_port, client_tor_socks_port)
                 general_writables.append(tor_writable)
 
             server_urls = []
-            if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:58888".format(self.hs_service_id))
-            if do_inet: server_urls.append("{0}:58888".format(util.get_ip_address()))
+            if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:{1}".format(self.hs_service_id, server_tgen_port))
+            if do_inet: server_urls.append("{0}:{1}".format(util.get_ip_address(), server_tgen_port))
 
             if do_onion or do_inet:
                 assert len(server_urls) > 0
 
                 tgen_client_writable = self.__start_tgen_client(server_urls)
-                general_writables.append(self.__start_twistd())
+                general_writables.append(self.__start_twistd(twistd_port))
 
                 self.__start_log_processors(general_writables, tgen_client_writable, torctl_client_writable)
 
@@ -250,11 +259,11 @@ class Measurement(object):
         logrotate.start()
         self.threads.append(logrotate)
 
-    def __start_tgen_client(self, server_urls):
-        return self.__start_tgen("client", 58889, 59001, server_urls)
+    def __start_tgen_client(self, server_urls, tgen_port, socks_port):
+        return self.__start_tgen("client", tgen_port, socks_port, server_urls)
 
-    def __start_tgen_server(self):
-        return self.__start_tgen("server", 58888)
+    def __start_tgen_server(self, tgen_port):
+        return self.__start_tgen("server", tgen_port)
 
     def __start_tgen(self, name, tgen_port, socks_port=None, server_urls=None):
         logging.info("Starting TGen {0} process...".format(name))
@@ -282,7 +291,7 @@ class Measurement(object):
 
         return tgen_writable
 
-    def __start_twistd(self):
+    def __start_twistd(self, twistd_port):
         logging.info("Starting Twistd server process...")
 
         twisted_datadir = "{0}/twistd".format(self.datadir_path)
@@ -297,20 +306,20 @@ class Measurement(object):
         generate_docroot_index(twisted_docroot)
         self.twisted_docroot = twisted_docroot
 
-        twisted_cmd = "{0} -n -l - web --port 50080 --path {1} --mime-type=None".format(self.twistd_bin_path, twisted_docroot)
+        twisted_cmd = "{0} -n -l - web --port {1} --path {2} --mime-type=None".format(self.twistd_bin_path, twistd_port, twisted_docroot)
         twisted_args = (twisted_cmd, twisted_datadir, twisted_writable, self.done_event, None, None, None)
         twisted_watchdog = threading.Thread(target=watchdog_thread_task, name="twistd_watchdog", args=twisted_args)
         twisted_watchdog.start()
         self.threads.append(twisted_watchdog)
-        logging.info("Twistd web server running at 0.0.0.0:{0}".format(50080))
+        logging.info("Twistd web server running at 0.0.0.0:{0}".format(twistd_port))
 
         return twisted_writable
 
-    def __start_tor_client(self):
-        return self.__start_tor("client", 59051, 59001)
+    def __start_tor_client(self, control_port, socks_port):
+        return self.__start_tor("client", control_port, socks_port)
 
-    def __start_tor_server(self):
-        return self.__start_tor("server", 59050, 59000, {58888: 58888})
+    def __start_tor_server(self, control_port, socks_port, tgen_server_port):
+        return self.__start_tor("server", control_port, socks_port, {tgen_server_port: tgen_server_port})
 
     def __start_tor(self, name, control_port, socks_port, hs_port_mapping=None):
         logging.info("Starting Tor {0} process...".format(name))

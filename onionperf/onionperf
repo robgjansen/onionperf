@@ -138,6 +138,18 @@ def main():
         metavar="PATH", type=type_str_path_in,
         action="store", dest="twistdpath",
         default=onionperf.util.which("twistd"))
+    
+    measure_parser.add_argument('--tgen-port',
+        help="""the TGen server port number N, must be Internet-accessible for non-onion downloads to work""",
+        metavar="N", type=type_nonnegative_integer,
+        action="store", dest="tgenport",
+        default=80)
+    
+    measure_parser.add_argument('--tgen-port',
+        help="""the Twistd web server port number N, where OnionPerf results can be fetched""",
+        metavar="N", type=type_nonnegative_integer,
+        action="store", dest="twistdport",
+        default=50080)
 
     measure_parser.add_argument('-p', '--prefix',
         help="""a directory PATH prefix where OnionPerf will run""",
@@ -146,7 +158,7 @@ def main():
         default=os.getcwd() + "/onionperf-data")
 
     measure_parser.add_argument('-i', '--no-inet',
-        help="""disable measuring download times over Tor back to {0}:58888""".format(hostname),
+        help="""disable measuring download times over Tor back to {0}""".format(hostname),
         action="store_false", dest="do_inet",
         default=True)
 
@@ -160,6 +172,13 @@ def main():
         metavar="STRING", type=str,
         action="store", dest="nickname",
         default=hostname)
+    
+    measure_parser.add_argument('-m', '--traffic-model',
+        help="""a file PATH to a TGen graphml XML traffic model, to use *instead* of the 
+built-in Torperf (50KiB, 1MiB, 5MiB) traffic model""",
+        metavar="PATH", type=type_str_path_in,
+        action="store", dest="model",
+        default=None)
 
     # analyze
     analyze_parser = sub_parser.add_parser('analyze', description=DESC_ANALYZE, help=HELP_ANALYZE)
@@ -324,8 +343,25 @@ def measure(args):
     # validate paths and run
     if args.torpath is not None and args.tgenpath is not None and args.twistdpath is not None:
         os.chdir(args.prefix)
+        if args.model:
+            # load custom model instead of Torperf model
+            pass
+        else:
+            # build a Torperf model
+            #model.TorperfModel(tgen_port="{0}".format(tgen_port), tgen_servers=server_urls, socksproxy="127.0.0.1:{0}".format(socks_port))
+            pass
+        client_tgen_port = onionperf.util.get_random_free_port()
+        client_tor_ctl_port = onionperf.util.get_random_free_port()
+        client_tor_socks_port = onionperf.util.get_random_free_port(),
+        server_tgen_port = args.tgenport
+        server_tor_ctl_port = onionperf.util.get_random_free_port()
+        server_tor_socks_port = onionperf.util.get_random_free_port()
+        twistd_port = args.twistdport
+
         meas = onionperf.measurement.Measurement(args.torpath, args.tgenpath, args.twistdpath, args.prefix, args.nickname)
-        meas.run(do_onion=args.do_onion, do_inet=args.do_inet)
+        meas.run(do_onion=args.do_onion, do_inet=args.do_inet,
+             client_tgen_port=client_tgen_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
+             server_tgen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port, twistd_port=twistd_port)
     else:
         logging.info("Please fix path errors to continue")
 

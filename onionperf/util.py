@@ -4,7 +4,7 @@ Created on Oct 1, 2015
 @author: rob
 '''
 
-import sys, os, socket, logging
+import sys, os, socket, logging, random, re
 from subprocess import Popen, PIPE, STDOUT
 from threading import Lock
 from cStringIO import StringIO
@@ -99,6 +99,15 @@ def get_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
     return s.getsockname()[0]
+
+def get_random_free_port():
+    while True:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        port = random.randint(10000, 60000)
+        rc = s.connect_ex(('127.0.0.1', port))
+        s.close()
+        if rc != 0: # error connecting, port is available
+            return port
 
 class DataSource(object):
     def __init__(self, filename, compress=False):
