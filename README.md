@@ -39,7 +39,7 @@ Python modules can be installed with `pip` if you satisfy the requirements of th
   + `onionperf model`: networkx
   + `onionperf measure`: stem, lxml, twisted, networkx
   + `onionperf analyze`: stem
-  + `onionperf visualize`: numpy, matplotlib
+  + `onionperf visualize`: pylab, numpy, matplotlib
 
 **Note**: You may want to skip installing numpy and matplotlib if you don't plan to use the visualize subcommand, since those tend to require several large dependencies.
 
