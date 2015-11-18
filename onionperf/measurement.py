@@ -5,9 +5,15 @@
 '''
 
 import os, subprocess, threading, Queue, logging, time, datetime, re, shlex
-import stem, stem.process, stem.version, stem.util.str_tools
 from lxml import etree
 
+# stem imports
+from stem.util import str_tools
+from stem.control import Controller
+from stem.version import Requirement, get_system_tor_version
+from stem import __version__ as stem_version
+
+# onionperf imports
 import analysis, monitor, model, util
 
 def generate_docroot_index(docroot_path):
@@ -149,7 +155,7 @@ class Measurement(object):
         '''
         only `server_tgen_port` and `twistd_port` are "public" and need to be opened on the firewall.
         all ports need to be unique though, and unique among multiple onionperf instances.
-        
+
         here are some sane defaults:
         client_tgen_port=58888, client_tor_ctl_port=59050, client_tor_socks_port=59000,
         server_tgen_port=80, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080
@@ -162,12 +168,12 @@ class Measurement(object):
             # make sure stem and Tor supports ephemeral HS (version >= 0.2.7.1-alpha)?
             if do_onion:
                 try:
-                    tor_version = stem.version.get_system_tor_version(self.tor_bin_path)
-                    if tor_version < stem.version.Requirement.ADD_ONION:  # ADD_ONION is a stem 1.4.0 feature
+                    tor_version = get_system_tor_version(self.tor_bin_path)
+                    if tor_version < Requirement.ADD_ONION:  # ADD_ONION is a stem 1.4.0 feature
                         logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, you have {0}, aborting".format(tor_version))
                         return
                 except:
-                    logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, you have {0}, aborting".format(stem.__version__))
+                    logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, you have {0}, aborting".format(stem_version))
                     return
 
             logging.info("Bootstrapping started...")
@@ -235,7 +241,7 @@ class Measurement(object):
 
             if self.hs_service_id is not None:
                 try:
-                    with stem.control.Controller.from_port(port=self.hs_control_port) as torctl:
+                    with Controller.from_port(port=self.hs_control_port) as torctl:
                         torctl.authenticate()
                         torctl.remove_ephemeral_hidden_service(self.hs_service_id)
                 except: pass  # this fails to authenticate if tor proc is dead
@@ -335,9 +341,10 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 60 seconds\nUseEntryGuards
         tor_writable = util.FileWritable(tor_logpath)
         logging.info("Logging Tor {0} process output to {1}".format(name, tor_logpath))
 
-        # tor_subp = stem.process.launch_tor_with_config(tor_config, tor_cmd=self.tor_bin_path, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=False)
+        # from stem.process import launch_tor_with_config
+        # tor_subp = launch_tor_with_config(tor_config, tor_cmd=self.tor_bin_path, completion_percent=100, init_msg_handler=None, timeout=None, take_ownership=False)
         tor_cmd = "{0} -f -".format(self.tor_bin_path)
-        tor_stdin_bytes = stem.util.str_tools._to_bytes(tor_config)
+        tor_stdin_bytes = str_tools._to_bytes(tor_config)
         tor_ready_str = "Bootstrapped 100"
         tor_ready_ev = threading.Event()
         tor_args = (tor_cmd, tor_datadir, tor_writable, self.done_event, tor_stdin_bytes, tor_ready_str, tor_ready_ev)
@@ -363,7 +370,7 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 60 seconds\nUseEntryGuards
 
         if hs_port_mapping is not None:
             logging.info("Creating ephemeral hidden service...")
-            with stem.control.Controller.from_port(port=control_port) as torctl:
+            with Controller.from_port(port=control_port) as torctl:
                 torctl.authenticate()
                 response = torctl.create_ephemeral_hidden_service(hs_port_mapping, detached=True, await_publication=True)
                 self.hs_service_id = response.service_id

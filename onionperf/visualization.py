@@ -8,8 +8,7 @@ import matplotlib; matplotlib.use('Agg')  # for systems without X11
 from matplotlib.backends.backend_pdf import PdfPages
 import pylab, numpy, time
 from abc import abstractmethod, ABCMeta
-
-LINEFORMATS = "k-,r-,b-,g-,c-,m-,y-,k--,r--,b--,g--,c--,m--,y--,k:,r:,b:,g:,c:,m:,y:,k-.,r-.,b-.,g-.,c-., m-.,y-."
+import poop
 '''
 pylab.rcParams.update({
     'backend': 'PDF',

@@ -4,12 +4,13 @@
   See LICENSE for licensing information
 '''
 
-import sys, os, socket, logging, random, re
+import sys, os, socket, logging, random, re, shutil, datetime
 from subprocess import Popen, PIPE, STDOUT
 from threading import Lock
 from cStringIO import StringIO
 from abc import ABCMeta, abstractmethod
-import shutil, datetime
+
+LINEFORMATS = "k-,r-,b-,g-,c-,m-,y-,k--,r--,b--,g--,c--,m--,y--,k:,r:,b:,g:,c:,m:,y:,k-.,r-.,b-.,g-.,c-., m-.,y-."
 
 def make_path(path):
     p = os.path.abspath(os.path.expanduser(path))

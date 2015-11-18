@@ -84,7 +84,7 @@ class TorperfModel(GeneratableTGenModel):
 
         g.add_edge("start", "pause")
 
-        # after the pause, we start another pause timer while *at the same time* choosing one of 
+        # after the pause, we start another pause timer while *at the same time* choosing one of
         # the file sizes and downloading it from one of the servers in the server pool
         g.add_edge("pause", "choose")
         g.add_edge("pause", "pause")

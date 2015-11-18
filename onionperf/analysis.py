@@ -4,17 +4,20 @@
   See LICENSE for licensing information
 '''
 
-from abc import ABCMeta, abstractmethod
-
 import sys, os, re, json, datetime, logging
+
 from multiprocessing import Pool, cpu_count
 from signal import signal, SIGINT, SIG_IGN
-
-import stem, stem.response, stem.response.events
-from stem.response import ControlMessage, convert
-import util
 from socket import gethostname
-from __builtin__ import True
+from abc import ABCMeta, abstractmethod
+
+# stem imports
+from stem import CircEvent, CircStatus, CircPurpose, StreamStatus
+from stem.response.events import CircuitEvent, CircMinorEvent, StreamEvent, BandwidthEvent, BuildTimeoutSetEvent
+from stem.response import ControlMessage, convert
+
+# onionperf imports
+import util
 
 class Analysis(object):
 
@@ -30,16 +33,16 @@ class Analysis(object):
 
     def add_torctl_file(self, filepath):
         self.torctl_filepaths.append(filepath)
-        
+
     def get_nodes(self):
         return self.json_db['data'].keys()
-    
+
     def get_tor_bandwidth_summary(self, node, direction):
         try:
             return self.json_db['data'][node]['tor']['bandwidth_summary'][direction]
         except:
             return None
-    
+
     def get_tgen_transfers_summary(self, node):
         try:
             return self.json_db['data'][node]['tgen']['transfers_summary']
@@ -583,25 +586,25 @@ class TorCtlParser(Parser):
         # first make sure we have a circuit object
         cid = int(event.id)
         circ = self.circuits_state.setdefault(cid, Circuit(cid))
-        is_hs_circ = True if event.purpose in (stem.CircPurpose.HS_CLIENT_INTRO, stem.CircPurpose.HS_CLIENT_REND, \
-                                   stem.CircPurpose.HS_SERVICE_INTRO, stem.CircPurpose.HS_SERVICE_REND) else False
+        is_hs_circ = True if event.purpose in (CircPurpose.HS_CLIENT_INTRO, CircPurpose.HS_CLIENT_REND, \
+                                   CircPurpose.HS_SERVICE_INTRO, CircPurpose.HS_SERVICE_REND) else False
 
         # now figure out what status we want to track
         key = None
-        if isinstance(event, stem.response.events.CircuitEvent):
-            if event.status == stem.CircStatus.LAUNCHED:
+        if isinstance(event, CircuitEvent):
+            if event.status == CircStatus.LAUNCHED:
                 circ.set_launched(arrival_dt, self.build_timeout_last, self.build_quantile_last)
 
             key = "{0}:{1}".format(event.purpose, event.status)
             circ.add_event(key, arrival_dt)
 
-            if event.status == stem.CircStatus.EXTENDED:
+            if event.status == CircStatus.EXTENDED:
                 circ.add_hop(event.path[-1], arrival_dt)
-            elif event.status == stem.CircStatus.FAILED:
+            elif event.status == CircStatus.FAILED:
                 circ.set_local_failure(event.reason)
                 if event.remote_reason is not None and event.remote_reason != '':
                     circ.set_remote_failure(event.remote_reason)
-            elif event.status == stem.CircStatus.BUILT:
+            elif event.status == CircStatus.BUILT:
                 circ.set_build_time(arrival_dt)
                 if is_hs_circ:
                     key = event.hs_state
@@ -609,7 +612,7 @@ class TorCtlParser(Parser):
                         key = "{0}:{1}".format(key, event.rend_query)
                     circ.add_event(key, arrival_dt)
 
-            if event.status == stem.CircStatus.CLOSED or event.status == stem.CircStatus.FAILED:
+            if event.status == CircStatus.CLOSED or event.status == CircStatus.FAILED:
                 circ.set_end_time(arrival_dt)
                 started, built, ended = circ.unix_ts_start, circ.buildtime_seconds, circ.unix_ts_end
 
@@ -623,8 +626,8 @@ class TorCtlParser(Parser):
                         self.circuits[cid] = data
                 self.circuits_state.pop(cid)
 
-        elif not self.do_simple and isinstance(event, stem.response.events.CircMinorEvent):
-            if event.purpose != event.old_purpose or event.event != stem.CircEvent.PURPOSE_CHANGED:
+        elif not self.do_simple and isinstance(event, CircMinorEvent):
+            if event.purpose != event.old_purpose or event.event != CircEvent.PURPOSE_CHANGED:
                 key = "{0}:{1}".format(event.event, event.purpose)
                 circ.add_event(key, arrival_dt)
 
@@ -644,15 +647,15 @@ class TorCtlParser(Parser):
         strm.add_event(event.purpose, event.status, arrival_dt)
         strm.set_target(event.target)
 
-        if event.status == stem.StreamStatus.NEW or event.status == stem.StreamStatus.NEWRESOLVE:
+        if event.status == StreamStatus.NEW or event.status == StreamStatus.NEWRESOLVE:
             strm.set_start_time(arrival_dt)
             strm.set_source(event.source_addr)
-        elif event.status == stem.StreamStatus.FAILED:
+        elif event.status == StreamStatus.FAILED:
             strm.set_local_failure(event.reason)
             if event.remote_reason is not None and event.remote_reason != '':
                 strm.set_remote_failure(event.remote_reason)
 
-        if event.status == stem.StreamStatus.CLOSED or event.status == stem.StreamStatus.FAILED:
+        if event.status == StreamStatus.CLOSED or event.status == StreamStatus.FAILED:
             strm.set_end_time(arrival_dt)
             stream_type = strm.last_purpose
             started, ended = strm.unix_ts_start, strm.unix_ts_end
@@ -673,13 +676,13 @@ class TorCtlParser(Parser):
         self.build_quantile_last = event.quantile
 
     def __handle_event(self, event, arrival_dt):
-        if isinstance(event, (stem.response.events.CircuitEvent, stem.response.events.CircMinorEvent)):
+        if isinstance(event, (CircuitEvent, CircMinorEvent)):
             self.__handle_circuit(event, arrival_dt)
-        elif isinstance(event, stem.response.events.StreamEvent):
+        elif isinstance(event, StreamEvent):
             self.__handle_stream(event, arrival_dt)
-        elif isinstance(event, stem.response.events.BandwidthEvent):
+        elif isinstance(event, BandwidthEvent):
             self.__handle_bw(event, arrival_dt)
-        elif isinstance(event, stem.response.events.BuildTimeoutSetEvent):
+        elif isinstance(event, BuildTimeoutSetEvent):
             self.__handle_buildtimeout(event, arrival_dt)
 
     def __parse_line(self, line):

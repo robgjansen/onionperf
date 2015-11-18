@@ -4,11 +4,13 @@
   See LICENSE for licensing information
 '''
 
-import datetime, stem
+import datetime
 from time import sleep
-from functools import partial
-from stem.control import EventType, Controller
 from socket import gethostname
+from functools import partial
+
+# stem imports
+from stem.control import EventType, Controller
 
 def get_supported_torctl_events():
     return list(EventType)
@@ -21,7 +23,7 @@ class TorMonitor(object):
         self.events = events
 
     def run(self, done_ev=None):
-        with stem.control.Controller.from_port(port=self.tor_ctl_port) as torctl:
+        with Controller.from_port(port=self.tor_ctl_port) as torctl:
             torctl.authenticate()
 
             vers_str = "Starting torctl program on host {2} using Tor version {0} status={1}\n".format(torctl.get_info('version'), torctl.get_info('status/version/current'), gethostname())
