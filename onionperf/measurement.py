@@ -328,7 +328,7 @@ class Measurement(object):
         if not os.path.exists(tor_datadir): os.makedirs(tor_datadir)
 
         tor_config_template = "ORPort 0\nDirPort 0\nControlPort {0}\nSocksPort {1}\nSocksListenAddress 127.0.0.1\nClientOnly 1\n\
-WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 10 seconds\nUseEntryGuards 0\nDataDirectory {2}\nLog INFO stdout\n"
+WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 60 seconds\nUseEntryGuards 0\nDataDirectory {2}\nLog INFO stdout\n"
         tor_config = tor_config_template.format(control_port, socks_port, tor_datadir)
 
         tor_logpath = "{0}/onionperf.tor.log".format(tor_datadir)
