@@ -10,7 +10,7 @@ from socket import gethostname
 from functools import partial
 
 # stem imports
-from stem.control import EventType, Controller
+from stem.control import EventType, Controller, Signal
 
 def get_supported_torctl_events():
     return list(EventType)
@@ -22,7 +22,7 @@ class TorMonitor(object):
         self.writable = writable
         self.events = events
 
-    def run(self, done_ev=None):
+    def run(self, newnym_interval_seconds=None, done_ev=None):
         with Controller.from_port(port=self.tor_ctl_port) as torctl:
             torctl.authenticate()
 
@@ -46,12 +46,17 @@ class TorMonitor(object):
 
             # let stem run its threads and log all of the events, until user interrupts
             try:
+                interval_count = 0
                 while done_ev is None or not done_ev.is_set():
                     # if self.filepath != '-' and os.path.exists(self.filepath):
                     #    with open(self.filepath, 'rb') as sizef:
                     #        msg = "tor-ctl-logger[port={0}] logged {1} bytes to {2}, press CTRL-C to quit".format(self.tor_ctl_port, os.fstat(sizef.fileno()).st_size, self.filepath)
                     #        logging.info(msg)
                     sleep(1)
+                    interval_count += 1
+                    if newnym_interval_seconds is not None and interval_count >= newnym_interval_seconds:
+                        interval_count = 0
+                        torctl.signal(Signal.NEWNYM)
             except KeyboardInterrupt:
                 pass  # the user hit ctrl+c
 
@@ -67,6 +72,6 @@ class TorMonitor(object):
         unix_ts = (utcnow - epoch).total_seconds()
         writable.write("{0} {1:.02f} {2}".format(now.strftime("%Y-%m-%d %H:%M:%S"), unix_ts, msg))
 
-def tor_monitor_run(tor_ctl_port, writable, events, done_ev):
+def tor_monitor_run(tor_ctl_port, writable, events, newnym_interval_seconds, done_ev):
     torctl_monitor = TorMonitor(tor_ctl_port, writable, events)
-    torctl_monitor.run(done_ev=done_ev)
+    torctl_monitor.run(newnym_interval_seconds=newnym_interval_seconds, done_ev=done_ev)

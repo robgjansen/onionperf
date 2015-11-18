@@ -363,7 +363,8 @@ WarnUnsafeSocks 0\nSafeLogging 0\nMaxCircuitDirtiness 60 seconds\nUseEntryGuards
         time.sleep(3)
 
         torctl_events = [e for e in monitor.get_supported_torctl_events() if e not in ['DEBUG', 'INFO', 'NOTICE', 'WARN', 'ERR']]
-        torctl_args = (control_port, torctl_writable, torctl_events, self.done_event)
+        newnym_interval_seconds = 300
+        torctl_args = (control_port, torctl_writable, torctl_events, newnym_interval_seconds, self.done_event)
         torctl_helper = threading.Thread(target=monitor.tor_monitor_run, name="torctl_{0}_helper".format(name), args=torctl_args)
         torctl_helper.start()
         self.threads.append(torctl_helper)
