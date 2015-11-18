@@ -1,49 +1,63 @@
 # OnionPerf
 
-OnionPerf is a utility to track the performance of hidden services in Tor.
+OnionPerf is a utility to track Tor and onion service performance.
 
 OnionPerf uses multiple processes and threads to download random data
 through Tor while tracking the performance of those downloads. The data is
 served and fetched on localhost using two TGen (traffic generator)
-processes, but is transferred through Tor using a temporary Tor Hidden
-Service process and a client process. Tor control information and TGen
-performance statistics are logged to disk and can be later analyzed (using
-onionperf-analyze.py) to visualize changes in Tor performance over time.
+processes, and is transferred through Tor using Tor client processes and
+an ephemeral Tor Onion Service. Tor control information and TGen
+performance statistics are logged to disk, analyzed once per day to
+produce a json stats database and files that can feek into Torperf, and
+can later be used to visualize changes in Tor client performance over time.
 
 For more information, see https://github.com/robgjansen/onionperf.
 
 ### Install Dependencies
 
-  + onionperf: python, python-stem
-  + tor: tor, libevent, openssl
-  + tgen: git, cmake, glib, igraph
-
-(You can build a custom Tor instead of using the package manager if you 
-want, and will be able to point OnionPerf at your custom Tor binary later.)
+  + **Tor** (>= v0.2.7.1-alpha): libevent, openssl
+  + **TGen** (Shadow >= v1.11.0): cmake, glib2, igraph
+  + **OnionPerf**: python, python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
 
 Fedora/RedHat:
 
 ```
-# for onionperf
-sudo yum install python python-stem tor git gcc cmake make glib2 glib2-devel igraph igraph-devel
-# for onionperf-analyze.py
-sudo yum install python numpy scipy python-matplotlib
+sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent libevent-devel openssl openssl-devel 
+sudo yum install python python-stem python-twisted python-lxml python-networkx python-matplotlib numpy
 ```
 
 Ubuntu/Debian:
 
 ```
-# for onionperf
-sudo apt-get install python python-stem tor git gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev
-# for onionperf-analyze.py
-sudo apt-get install python python-matplotlib python-numpy python-scipy
+sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev
+sudo apt-get install python python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy
+```
+
+Python modules can be installed with `pip` if you satisfy the requirements of the module. The module requirements for each OnionPerf subcommand are as follows:
+
+  + `onionperf monitor`: stem
+  + `onionperf model`: networkx
+  + `onionperf measure`: stem, lxml, twisted, networkx
+  + `onionperf analyze`: stem
+  + `onionperf visualize`: numpy, matplotlib
+
+**Note**: You may want to skip installing numpy and matplotlib if you don't plan to use the visualize subcommand, since those tend to require several large dependencies.
+
+**Note**: You can install Tor via the package manager as well, though the preferred method is to build from source.
+
+### Build Tor
+
+```
+git clone
+configure
+make
 ```
 
 ### Build TGen Traffic Generator
 
 The traffic generator currently exists in the Shadow simulator repository,
-but we will build tgen as an external tool and skip building both the full 
-simulator and the tgen simulator plugin.
+but we will build TGen as an external tool and skip building both the full 
+simulator and the TGen simulator plugin.
 
 ```
 git clone https://github.com/shadow/shadow.git
@@ -53,6 +67,11 @@ cd build
 cmake .. -DSKIP_SHADOW=ON -DCMAKE_MODULE_PATH=`pwd`/../../../../cmake/
 make
 ```
+
+### Prepare OnionPerf
+
+
+http://docs.python-guide.org/en/latest/dev/virtualenvs/
 
 ### Run OnionPerf
 
