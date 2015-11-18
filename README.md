@@ -23,14 +23,14 @@ Fedora/RedHat:
 
 ```
 sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent libevent-devel openssl openssl-devel 
-sudo yum install python python-stem python-twisted python-lxml python-networkx python-matplotlib numpy
+sudo yum install python python-stem python-twisted python-lxml python-networkx python-matplotlib numpy scipy
 ```
 
 Ubuntu/Debian:
 
 ```
 sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev
-sudo apt-get install python python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy
+sudo apt-get install python python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy python-scipy
 ```
 
 Python modules can be installed with `pip` if you satisfy the requirements of the module. The module requirements for each OnionPerf subcommand are as follows:
@@ -39,7 +39,7 @@ Python modules can be installed with `pip` if you satisfy the requirements of th
   + `onionperf model`: networkx
   + `onionperf measure`: stem, lxml, twisted, networkx
   + `onionperf analyze`: stem
-  + `onionperf visualize`: pylab, numpy, matplotlib
+  + `onionperf visualize`: scipy, numpy, pylab, matplotlib
 
 **Note**: You may want to skip installing numpy and matplotlib if you don't plan to use the visualize subcommand, since those tend to require several large dependencies.
 
