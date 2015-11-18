@@ -1,7 +1,7 @@
 '''
-Created on Oct 1, 2015
-
-@author: robgjansen
+  OnionPerf
+  Authored by Rob Jansen
+  See LICENSE for licensing information
 '''
 
 from abc import ABCMeta, abstractmethod

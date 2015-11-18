@@ -1,7 +1,7 @@
 '''
-Created on Oct 10, 2015
-
-@author: rob
+  OnionPerf
+  Authored by Rob Jansen
+  See LICENSE for licensing information
 '''
 
 import datetime, stem

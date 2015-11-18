@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 
+'''
+  OnionPerf
+  Authored by Rob Jansen
+  See LICENSE for licensing information
+'''
+
 import sys, os, argparse, logging
 from itertools import cycle
 from socket import gethostname

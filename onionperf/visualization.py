@@ -1,7 +1,7 @@
 '''
-Created on Oct 1, 2015
-
-@author: rob
+  OnionPerf
+  Authored by Rob Jansen
+  See LICENSE for licensing information
 '''
 
 import matplotlib; matplotlib.use('Agg')  # for systems without X11
