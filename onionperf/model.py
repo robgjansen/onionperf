@@ -95,3 +95,15 @@ class TorperfModel(GeneratableTGenModel):
         g.add_edge("choose", "transfer5m")
 
         return g
+
+def dump_example_tgen_torperf_model(domain_name, onion_name):                                                                                                                        
+    # the server listens on 8888, the client uses Tor to come back directly, and using a hidden serv
+    server = ListenModel(tgen_port="8888")
+    public_server_str = "{0}:8888".format(domain_name)
+    onion_server_str = "{0}:8890".format(onion_name)
+    client = TorperfModel(tgen_port="8889", socksproxy="localhost:9001", tgen_servers=[public_server_str, onion_server_str])
+    
+    # save to specified paths
+    server.dump_to_file("tgen.server.torperf.graphml.xml")
+    client.dump_to_file("tgen.client.torperf.graphml.xml")
+
