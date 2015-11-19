@@ -201,7 +201,7 @@ class Measurement(object):
             if do_onion or do_inet:
                 assert len(server_urls) > 0
 
-                tgen_client_writable = self.__start_tgen_client(server_urls)
+                tgen_client_writable = self.__start_tgen_client(server_urls, client_tgen_port, client_tor_socks_port)
                 general_writables.append(self.__start_twistd(twistd_port))
 
                 self.__start_log_processors(general_writables, tgen_client_writable, torctl_client_writable)
