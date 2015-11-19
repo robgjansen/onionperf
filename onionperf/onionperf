@@ -363,7 +363,7 @@ def measure(args):
             pass
         client_tgen_port = util.get_random_free_port()
         client_tor_ctl_port = util.get_random_free_port()
-        client_tor_socks_port = util.get_random_free_port(),
+        client_tor_socks_port = util.get_random_free_port()
         server_tgen_port = args.tgenport
         server_tor_ctl_port = util.get_random_free_port()
         server_tor_socks_port = util.get_random_free_port()
