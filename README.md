@@ -39,7 +39,6 @@ Python modules can be installed with `pip` if you satisfy the requirements of
 the modules. The module requirements for each OnionPerf subcommand are as follows:
 
   + `onionperf monitor`: stem
-  + `onionperf model`: networkx
   + `onionperf measure`: stem, lxml, twisted, networkx
   + `onionperf analyze`: stem
   + `onionperf visualize`: scipy, numpy, pylab, matplotlib
