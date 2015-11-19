@@ -32,7 +32,7 @@ control port, registers for several asynchronous events, and logs the events to 
 as they occur over time.
 """
 HELP_MONITOR = """
-Connects to Tor on an open control port, and logs various asynchronous events
+Connects to a running Tor process with an open control port, and logs various asynchronous events
 """
 
 DESC_MEASURE = """
