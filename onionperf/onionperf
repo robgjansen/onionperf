@@ -345,7 +345,7 @@ def monitor(args):
 
 def measure(args):
     from onionperf.measurement import Measurement
-    
+
     # check paths
     args.torpath = util.find_path(args.torpath, "tor")
     if args.torpath is not None: args.tgenpath = util.find_path(args.tgenpath, "tgen")

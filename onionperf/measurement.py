@@ -272,7 +272,7 @@ class Measurement(object):
         return self.__start_tgen("server", tgen_port)
 
     def __start_tgen(self, name, tgen_port, socks_port=None, server_urls=None):
-        logging.info("Starting TGen {0} process...".format(name))
+        logging.info("Starting TGen {0} process on port {1}...".format(name, tgen_port))
 
         tgen_datadir = "{0}/tgen-{1}".format(self.datadir_path, name)
         if not os.path.exists(tgen_datadir): os.makedirs(tgen_datadir)
@@ -298,7 +298,7 @@ class Measurement(object):
         return tgen_writable
 
     def __start_twistd(self, twistd_port):
-        logging.info("Starting Twistd server process...")
+        logging.info("Starting Twistd server process on port {0}...".format(twistd_port))
 
         twisted_datadir = "{0}/twistd".format(self.datadir_path)
         if not os.path.exists(twisted_datadir): os.makedirs(twisted_datadir)
@@ -328,7 +328,7 @@ class Measurement(object):
         return self.__start_tor("server", control_port, socks_port, {tgen_server_port: tgen_server_port})
 
     def __start_tor(self, name, control_port, socks_port, hs_port_mapping=None):
-        logging.info("Starting Tor {0} process...".format(name))
+        logging.info("Starting Tor {0} process with ControlPort={1}, SocksPort={2}...".format(name, control_port, socks_port))
 
         tor_datadir = "{0}/tor-{1}".format(self.datadir_path, name)
         if not os.path.exists(tor_datadir): os.makedirs(tor_datadir)
