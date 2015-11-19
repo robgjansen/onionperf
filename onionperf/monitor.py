@@ -1,6 +1,6 @@
 '''
   OnionPerf
-  Authored by Rob Jansen
+  Authored by Rob Jansen, 2015
   See LICENSE for licensing information
 '''
 
