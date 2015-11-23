@@ -78,7 +78,7 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
             subp.wait()
 
         # the subp should be stopped now, flush any remaining lines
-        subp.stdout.close()
+        #subp.stdout.close() # results in concurrent write error
 
         # the helper should stop since stdout was closed
         t.join()
