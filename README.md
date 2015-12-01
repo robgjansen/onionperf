@@ -16,7 +16,7 @@ For more information, see https://github.com/robgjansen/onionperf.
 ### Install Dependencies
 
   + **Tor** (>= v0.2.7.3-rc): libevent, openssl
-  + **TGen** (Shadow >= v1.11.0): cmake, glib2, igraph
+  + **TGen** (Shadow >= v1.11.1): cmake, glib2, igraph
   + **OnionPerf**: python, python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
 
 The easiest way to satisfy all dependencies is to use a package manager.

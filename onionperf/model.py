@@ -77,7 +77,6 @@ class TorperfModel(GeneratableTGenModel):
         if self.socksproxy is not None:
             g.node["start"]["socksproxy"] = self.socksproxy
         g.add_node("pause", time="5 minutes")
-        g.add_node("choose")
         g.add_node("transfer50k", type="get", protocol="tcp", size="50 KiB", timeout="295 seconds", stallout="300 seconds")
         g.add_node("transfer1m", type="get", protocol="tcp", size="1 MiB", timeout="1795 seconds", stallout="1800 seconds")
         g.add_node("transfer5m", type="get", protocol="tcp", size="5 MiB", timeout="3595 seconds", stallout="3600 seconds")
@@ -86,13 +85,12 @@ class TorperfModel(GeneratableTGenModel):
 
         # after the pause, we start another pause timer while *at the same time* choosing one of
         # the file sizes and downloading it from one of the servers in the server pool
-        g.add_edge("pause", "choose")
         g.add_edge("pause", "pause")
 
-        # these are chosen with equal probability unless a 'weight' attribute is set on the edges
-        g.add_edge("choose", "transfer50k")
-        g.add_edge("choose", "transfer1m")
-        g.add_edge("choose", "transfer5m")
+        # these are chosen with equal probability, change edge 'weight' attributes to adjust probability
+        g.add_edge("pause", "transfer50k", weight="1.0")
+        g.add_edge("pause", "transfer1m", weight="1.0")
+        g.add_edge("pause", "transfer5m", weight="1.0")
 
         return g
 
