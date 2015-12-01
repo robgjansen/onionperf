@@ -15,7 +15,7 @@ For more information, see https://github.com/robgjansen/onionperf.
 
 ### Install Dependencies
 
-  + **Tor** (>= v0.2.7.1-alpha): libevent, openssl
+  + **Tor** (>= v0.2.7.3-rc): libevent, openssl
   + **TGen** (Shadow >= v1.11.0): cmake, glib2, igraph
   + **OnionPerf**: python, python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
 
@@ -52,7 +52,7 @@ preferred method is to build from source.
 
 ### Build Tor
 
-We need at least version 0.2.7.1-alpha
+We need at least version 0.2.7.3-rc
 
 ```
 git clone https://git.torproject.org/tor.git -b release-0.2.7

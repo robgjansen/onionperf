@@ -10,7 +10,7 @@ from lxml import etree
 # stem imports
 from stem.util import str_tools
 from stem.control import Controller
-from stem.version import Requirement, get_system_tor_version
+from stem.version import Version, Requirement, get_system_tor_version
 from stem import __version__ as stem_version
 
 # onionperf imports
@@ -165,12 +165,13 @@ class Measurement(object):
 
         # if ctrl-c is pressed, shutdown child processes properly
         try:
-            # make sure stem and Tor supports ephemeral HS (version >= 0.2.7.1-alpha)?
+            # make sure stem and Tor supports ephemeral HS (version >= 0.2.7.1-alpha)
+            # and also the NEWNYM mode that clears descriptor cache (version >= 0.2.7.3-rc)
             if do_onion:
                 try:
                     tor_version = get_system_tor_version(self.tor_bin_path)
-                    if tor_version < Requirement.ADD_ONION:  # ADD_ONION is a stem 1.4.0 feature
-                        logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.1-alpha, you have {0}, aborting".format(tor_version))
+                    if tor_version < Requirement.ADD_ONION or tor_version < Version('0.2.7.3-rc'):  # ADD_ONION is a stem 1.4.0 feature
+                        logging.warning("OnionPerf in onion mode requires Tor version >= 0.2.7.3-rc, you have {0}, aborting".format(tor_version))
                         return
                 except:
                     logging.warning("OnionPerf in onion mode requires stem version >= 1.4.0, you have {0}, aborting".format(stem_version))
