@@ -140,15 +140,9 @@ class Analysis(object):
 
                 logging.info("saving analysis results to {0}".format(filepath))
 
-                # if the file exists, try to append to it
-                # this needs to be checked before opening the file
-                should_append = os.path.exists(filepath) and not do_compress
-
-                output = util.FileWritable(filepath, do_compress=do_compress)
+                # always append instead of truncating file
+                output = util.FileWritable(filepath, do_compress=do_compress, do_truncate=False)
                 output.open()
-
-                if not should_append:
-                    output.write("@type torperf 1.0\r\n")
 
                 for xfer_db in xfers_by_filesize[filesize]:
                     # sanity checks
@@ -210,6 +204,7 @@ class Analysis(object):
                             d['USED_AT'] = stream_db['unix_ts_end']
                             d['USED_BY'] = int(stream_db['stream_id'])
 
+                    output.write("@type torperf 1.0\r\n")
                     output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
                     output.write("{0}\r\n".format(output_str))
 
