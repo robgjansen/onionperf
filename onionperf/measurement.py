@@ -4,7 +4,7 @@
   See LICENSE for licensing information
 '''
 
-import os, subprocess, threading, Queue, logging, time, datetime, re, shlex
+import sys, os, traceback, subprocess, threading, Queue, logging, time, datetime, re, shlex
 from lxml import etree
 
 # stem imports
@@ -132,8 +132,9 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
                     # update the xml index in docroot
                     generate_docroot_index(docroot)
                 except Exception as e:
+                    exc_info = sys.exc_info()
                     logging.warning("Caught and ignored exception in TorPerf log parser: {0}".format(repr(e)))
-
+                    traceback.print_exception(*exc_info)
             # reset our timer
             next_midnight = None
 
