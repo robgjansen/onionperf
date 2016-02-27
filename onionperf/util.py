@@ -199,7 +199,7 @@ class FileWritable(Writable):
             self.ddproc = Popen(dd_cmd.split(), stdin=self.xzproc.stdout, stdout=open(os.devnull, 'w'), stderr=STDOUT)
             self.file = self.xzproc.stdin
         else:
-            self.file = open(self.filename, 'w' if self.do_truncate else 'a')
+            self.file = open(self.filename, 'w' if self.do_truncate else 'a', 0)
 
     def close(self):
         self.lock.acquire()
