@@ -145,17 +145,23 @@ def main():
         action="store", dest="twistdpath",
         default=util.which("twistd"))
 
-    measure_parser.add_argument('--tgen-port',
-        help="""the TGen server port number N, must be Internet-accessible for non-onion downloads to work""",
+    measure_parser.add_argument('--tgen-listen-port',
+        help="""the TGen server listen port number N, must either be equal to '--tgen-connect-port' or a firewall rule should be in place to forward '--tgen-connect-port' to this port""",
         metavar="N", type=type_nonnegative_integer,
-        action="store", dest="tgenport",
-        default=80)
+        action="store", dest="tgenlistenport",
+        default=8080)
+
+    measure_parser.add_argument('--tgen-connect-port',
+        help="""the TGen client connect port number N, must be Internet-accessible for non-onion downloads to work""",
+        metavar="N", type=type_nonnegative_integer,
+        action="store", dest="tgenconnectport",
+        default=8080)
 
     measure_parser.add_argument('--twistd-port',
         help="""the Twistd web server port number N, where OnionPerf results can be fetched""",
         metavar="N", type=type_nonnegative_integer,
         action="store", dest="twistdport",
-        default=50080)
+        default=8081)
 
     measure_parser.add_argument('-i', '--no-inet',
         help="""disable measuring download times over Tor back to {0}""".format(hostname),
@@ -334,18 +340,19 @@ def measure(args):
             # build a Torperf model
             # model.TorperfModel(tgen_port="{0}".format(tgen_port), tgen_servers=server_urls, socksproxy="127.0.0.1:{0}".format(socks_port))
             pass
+        client_connect_port = args.tgenconnectport
         client_tgen_port = util.get_random_free_port()
         client_tor_ctl_port = util.get_random_free_port()
         client_tor_socks_port = util.get_random_free_port()
-        server_tgen_port = args.tgenport
+        server_tgen_port = args.tgenlistenport
         server_tor_ctl_port = util.get_random_free_port()
         server_tor_socks_port = util.get_random_free_port()
         twistd_port = args.twistdport
 
         meas = Measurement(args.torpath, args.tgenpath, args.twistdpath, args.prefix, args.nickname)
         meas.run(do_onion=args.do_onion, do_inet=args.do_inet,
-             client_tgen_port=client_tgen_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
-             server_tgen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port, twistd_port=twistd_port)
+             client_tgen_listen_port=client_tgen_port, client_tgen_connect_port=client_connect_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
+             server_tgen_listen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port, twistd_port=twistd_port)
     else:
         logging.info("Please fix path errors to continue")
 

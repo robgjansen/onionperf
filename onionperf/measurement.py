@@ -165,15 +165,16 @@ class Measurement(object):
         self.hs_service_id = None
         self.twisted_docroot = None
 
-    def run(self, do_onion=True, do_inet=True, client_tgen_port=58888, client_tor_ctl_port=59050, client_tor_socks_port=59000,
-             server_tgen_port=80, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
+    def run(self, do_onion=True, do_inet=True, client_tgen_listen_port=58888, client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
+             server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
         '''
-        only `server_tgen_port` and `twistd_port` are "public" and need to be opened on the firewall.
+        only `server_tgen_listen_port` and `twistd_port` are "public" and need to be opened on the firewall.
+        if `client_tgen_connect_port` != `server_tgen_listen_port`, then you should have installed a forwarding rule in teh firewall.
         all ports need to be unique though, and unique among multiple onionperf instances.
 
         here are some sane defaults:
-        client_tgen_port=58888, client_tor_ctl_port=59050, client_tor_socks_port=59000,
-        server_tgen_port=80, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080
+        client_tgen_listen_port=58888, client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
+        server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080
         '''
         self.threads = []
         self.done_event = threading.Event()
@@ -199,10 +200,10 @@ class Measurement(object):
             tgen_client_writable, torctl_client_writable = None, None
 
             if do_onion or do_inet:
-                general_writables.append(self.__start_tgen_server(server_tgen_port))
+                general_writables.append(self.__start_tgen_server(server_tgen_listen_port))
 
             if do_onion:
-                tor_writable, torctl_writable = self.__start_tor_server(server_tor_ctl_port, server_tor_socks_port, server_tgen_port)
+                tor_writable, torctl_writable = self.__start_tor_server(server_tor_ctl_port, server_tor_socks_port, {server_tgen_listen_port:client_tgen_connect_port})
                 general_writables.append(tor_writable)
                 general_writables.append(torctl_writable)
 
@@ -211,13 +212,13 @@ class Measurement(object):
                 general_writables.append(tor_writable)
 
             server_urls = []
-            if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:{1}".format(self.hs_service_id, server_tgen_port))
-            if do_inet: server_urls.append("{0}:{1}".format(util.get_ip_address(), server_tgen_port))
+            if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:{1}".format(self.hs_service_id, server_tgen_listen_port))
+            if do_inet: server_urls.append("{0}:{1}".format(util.get_ip_address(), client_tgen_connect_port))
 
             if do_onion or do_inet:
                 assert len(server_urls) > 0
 
-                tgen_client_writable = self.__start_tgen_client(server_urls, client_tgen_port, client_tor_socks_port)
+                tgen_client_writable = self.__start_tgen_client(server_urls, client_tgen_listen_port, client_tor_socks_port)
                 general_writables.append(self.__start_twistd(twistd_port))
 
                 self.__start_log_processors(general_writables, tgen_client_writable, torctl_client_writable)
@@ -332,8 +333,8 @@ class Measurement(object):
     def __start_tor_client(self, control_port, socks_port):
         return self.__start_tor("client", control_port, socks_port)
 
-    def __start_tor_server(self, control_port, socks_port, tgen_server_port):
-        return self.__start_tor("server", control_port, socks_port, {tgen_server_port: tgen_server_port})
+    def __start_tor_server(self, control_port, socks_port, hs_port_mapping):
+        return self.__start_tor("server", control_port, socks_port, hs_port_mapping)
 
     def __start_tor(self, name, control_port, socks_port, hs_port_mapping=None):
         logging.info("Starting Tor {0} process with ControlPort={1}, SocksPort={2}...".format(name, control_port, socks_port))
