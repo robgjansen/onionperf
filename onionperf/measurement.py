@@ -31,6 +31,8 @@ def readline_thread_task(instream, q):
 def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_str, ready_ev):
 
     # launch or re-launch our sub process until we are told to stop
+    # if we fail too many times in too short of time, give up and exit
+    failure_times = []
     while done_ev.is_set() is False:
         stdin_handle = subprocess.PIPE if send_stdin is not None else None
         subp = subprocess.Popen(shlex.split(cmd), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=stdin_handle)
@@ -76,6 +78,16 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
             # we collected no exit code, so it is still running
             subp.terminate()
             subp.wait()
+        elif done_ev.is_set():
+            logging.info("command '{}' finished as expected".format(cmd))
+        else:
+            logging.warning("command '{}' finished before expected".format(cmd))
+            now = time.time()
+            # remove failures that happened more than an hour ago
+            while len(failure_times) > 0 and failure_times[0] < (now-3600.0):
+                failure_times.pop(0)
+            # add a new failure that just occurred
+            failure_times.append(now)
 
         # the subp should be stopped now, flush any remaining lines
         #subp.stdout.close() # results in concurrent write error
@@ -86,9 +98,12 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
         # helper thread is done, make sure we drain the remaining lines from the stdout queue
         while not stdout_q.empty():
             writable.write(stdout_q.get_nowait())
+        # if we have too many failures, exit the watchdog to propogate the error up
+        if len(failure_times) > 10:
+            break
         # now loop around: either the master asked us to stop, or the subp died and we relaunch it
 
-    # master asked us to stop, close the writable before exiting thread
+    # too many failures, or master asked us to stop, close the writable before exiting thread
     writable.close()
 
 def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, nickname, done_ev):
@@ -209,26 +224,18 @@ class Measurement(object):
 
                 logging.info("Bootstrapping finished, entering heartbeat loop")
                 time.sleep(1)
-                broken_count = 0
                 while True:
                     # TODO add status update of some kind? maybe the number of files in the twistd directory?
                     # logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count(tgen_client_writable.filename)))
 
-                    while broken_count < 60:
-                        if self.__is_alive():
-                            logging.info("All helper processes seem to be alive :)")
-                            broken_count = 0
-                            break
-                        else:
-                            logging.warning("Some parallel components have died :(")
-                            broken_count += 1
-                            logging.info("Waiting 60 seconds for watchdog to reboot subprocess...")
-                            time.sleep(60)
-
-                    if broken_count >= 60:
-                        logging.info("We've been in a broken state for 60 minutes, giving up and exiting now")
+                    if self.__is_alive():
+                        logging.info("All helper processes seem to be alive :)")
+                    else:
+                        logging.warning("Some parallel components failed too many times or have died :(")
+                        logging.info("We are in a broken state, giving up and exiting now")
                         break
-                    logging.info("Main process will now sleep for 1 hour (helper processes run on their own schedule)")
+
+                    logging.info("Next main process heartbeat is in 1 hour (helper processes run on their own schedule)")
                     logging.info("press CTRL-C for graceful shutdown...")
                     time.sleep(3600)
             else:
