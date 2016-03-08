@@ -35,17 +35,17 @@ registers for several asynchronous events, and logs the events to disk
 as they occur over time.
 """
 HELP_MONITOR = """
-Connects to Tor and log controller events to file
+Connect to Tor and log controller events to file
 """
 
 DESC_MEASURE = """
 OnionPerf uses multiple processes and threads to download random data through
 Tor while tracking the performance of those downloads. The data is served and
 fetched on localhost using two TGen (traffic generator) processes, but is
-tranferred through Tor using an ephemeral Tor Onion Service and a Tor
+transferred through Tor using an ephemeral Tor Onion Service and a Tor
 client process. Tor control information and TGen performance statistics are
 logged to disk and can be later analyzed (using `onionperf analyze`) to
-vizualize changes in Tor performance over time.
+visualize changes in Tor performance over time.
 """
 HELP_MEASURE = """
 Measure Tor and Onion Service Performance using TGen
@@ -71,7 +71,7 @@ Analyze Tor and TGen output
 """
 
 DESC_VISUALIZE = """
-Loads a OnionPerf json file, e.g., one produced with the `analyze` subcommand,
+Loads an OnionPerf json file, e.g., one produced with the `analyze` subcommand,
 and plots various interesting performance metrics to PDF files.
 """
 HELP_VISUALIZE = """

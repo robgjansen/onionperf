@@ -169,7 +169,7 @@ class Measurement(object):
              server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
         '''
         only `server_tgen_listen_port` and `twistd_port` are "public" and need to be opened on the firewall.
-        if `client_tgen_connect_port` != `server_tgen_listen_port`, then you should have installed a forwarding rule in teh firewall.
+        if `client_tgen_connect_port` != `server_tgen_listen_port`, then you should have installed a forwarding rule in the firewall.
         all ports need to be unique though, and unique among multiple onionperf instances.
 
         here are some sane defaults:
@@ -296,7 +296,7 @@ class Measurement(object):
 
         tgen_logpath = "{0}/onionperf.tgen.log".format(tgen_datadir)
         tgen_writable = util.FileWritable(tgen_logpath)
-        logging.info("Logging TGen client process output to {0}".format(tgen_logpath))
+        logging.info("Logging TGen {1} process output to {0}".format(tgen_logpath, name))
 
         tgen_cmd = "{0} {1}".format(self.tgen_bin_path, tgen_confpath)
         tgen_args = (tgen_cmd, tgen_datadir, tgen_writable, self.done_event, None, None, None)
