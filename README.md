@@ -93,7 +93,7 @@ description of each mode, use:
 onionperf -h
 ```
 
-  + monitor: Connects to Tor and log controller events to file
+  + monitor: Connect to Tor and log controller events to file
   + measure: Measure Tor and Onion Service Performance using TGen
   + analyze: Analyze Tor and TGen output
   + visualize: Visualize OnionPerf analysis results
