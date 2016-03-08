@@ -165,7 +165,7 @@ class Measurement(object):
         self.hs_service_id = None
         self.twisted_docroot = None
 
-    def run(self, do_onion=True, do_inet=True, client_tgen_listen_port=58888, client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
+    def run(self, do_onion=True, do_inet=True, client_tgen_listen_port=58888, client_tgen_connect_ip='0.0.0.0', client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
              server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
         '''
         only `server_tgen_listen_port` and `twistd_port` are "public" and need to be opened on the firewall.
@@ -213,7 +213,9 @@ class Measurement(object):
 
             server_urls = []
             if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:{1}".format(self.hs_service_id, server_tgen_listen_port))
-            if do_inet: server_urls.append("{0}:{1}".format(util.get_ip_address(), client_tgen_connect_port))
+            if do_inet:
+                connect_ip = client_tgen_connect_ip if client_tgen_connect_ip != '0.0.0.0' else util.get_ip_address()
+                server_urls.append("{0}:{1}".format(connect_ip, client_tgen_connect_port))
 
             if do_onion or do_inet:
                 assert len(server_urls) > 0

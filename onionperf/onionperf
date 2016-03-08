@@ -6,7 +6,7 @@
   See LICENSE for licensing information
 '''
 
-import sys, os, argparse, logging
+import sys, os, argparse, logging, re
 from itertools import cycle
 from socket import gethostname
 
@@ -144,6 +144,12 @@ def main():
         metavar="PATH", type=type_str_path_in,
         action="store", dest="twistdpath",
         default=util.which("twistd"))
+
+    measure_parser.add_argument('--tgen-connect-ip',
+        help="""the TGen client connect IP address ADDR, or 0.0.0.0 to do an external IP lookup; must be Internet-accessible for non-onion downloads to work""",
+        metavar="ADDR", type=type_str_ip_in,
+        action="store", dest="tgenconnectip",
+        default="0.0.0.0")
 
     measure_parser.add_argument('--tgen-listen-port',
         help="""the TGen server listen port number N, must either be equal to '--tgen-connect-port' or a firewall rule should be in place to forward '--tgen-connect-port' to this port""",
@@ -340,10 +346,13 @@ def measure(args):
             # build a Torperf model
             # model.TorperfModel(tgen_port="{0}".format(tgen_port), tgen_servers=server_urls, socksproxy="127.0.0.1:{0}".format(socks_port))
             pass
+
+        client_connect_ip = args.tgenconnectip
         client_connect_port = args.tgenconnectport
         client_tgen_port = util.get_random_free_port()
         client_tor_ctl_port = util.get_random_free_port()
         client_tor_socks_port = util.get_random_free_port()
+
         server_tgen_port = args.tgenlistenport
         server_tor_ctl_port = util.get_random_free_port()
         server_tor_socks_port = util.get_random_free_port()
@@ -351,7 +360,7 @@ def measure(args):
 
         meas = Measurement(args.torpath, args.tgenpath, args.twistdpath, args.prefix, args.nickname)
         meas.run(do_onion=args.do_onion, do_inet=args.do_inet,
-             client_tgen_listen_port=client_tgen_port, client_tgen_connect_port=client_connect_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
+             client_tgen_listen_port=client_tgen_port, client_tgen_connect_ip=client_connect_ip, client_tgen_connect_port=client_connect_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
              server_tgen_listen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port, twistd_port=twistd_port)
     else:
         logging.info("Please fix path errors to continue")
@@ -398,13 +407,13 @@ def visualize(args):
 
 def type_nonnegative_integer(value):
     i = int(value)
-    if i < 0: raise argparse.ArgumentTypeError("%s is an invalid non-negative int value" % value)
+    if i < 0: raise argparse.ArgumentTypeError("'%s' is an invalid non-negative int value" % value)
     return i
 
 def type_supported_analysis(value):
     t = value.lower()
     if t != "all" and t != "tgen" and t != "tor":
-        raise argparse.ArgumentTypeError("%s is an invalid Analysis type" % value)
+        raise argparse.ArgumentTypeError("'%s' is an invalid Analysis type" % value)
     return t
 
 def type_str_path_out(value):
@@ -421,8 +430,15 @@ def type_str_path_in(value):
         return s
     p = os.path.abspath(os.path.expanduser(s))
     if not os.path.exists(p):
-        raise argparse.ArgumentTypeError("path %s does not exist" % s)
+        raise argparse.ArgumentTypeError("path '%s' does not exist" % s)
     return p
+
+def type_str_ip_in(value):
+    s = str(value)
+    ip = re.match(r'[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}', s)
+    if ip is None:
+        raise argparse.ArgumentTypeError("IP address '%s' is not a valid address" % s)
+    return ip
 
 # a custom action for passing in experimental data directories when plotting
 class PathStringArgsAction(argparse.Action):
