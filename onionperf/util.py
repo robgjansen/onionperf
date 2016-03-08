@@ -4,7 +4,7 @@
   See LICENSE for licensing information
 '''
 
-import sys, os, socket, logging, random, re, shutil, datetime
+import sys, os, socket, logging, random, re, shutil, datetime, urllib
 from subprocess import Popen, PIPE, STDOUT
 from threading import Lock
 from cStringIO import StringIO
@@ -42,17 +42,17 @@ def find_file_paths_pairs(searchpath, patterns_a, patterns_b):
             paths_a = []
             found = False
             for pattern in patterns_a:
-                if re.search(pattern, fbase): 
+                if re.search(pattern, fbase):
                     found = True
-            if found: 
+            if found:
                 paths_a.append(fpath)
 
             paths_b = []
             found = False
             for pattern in patterns_b:
-                if re.search(pattern, fbase): 
+                if re.search(pattern, fbase):
                     found = True
-            if found: 
+            if found:
                 paths_b.append(fpath)
 
             if len(paths_a) > 0 or len(paths_b) > 0:
@@ -97,9 +97,21 @@ def timestamp_to_seconds(stamp):  # unix timestamp
     return float(stamp)
 
 def get_ip_address():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    return s.getsockname()[0]
+    ip_address = None
+
+    data = urllib.urlopen('https://check.torproject.org/').read()
+    if data is not None and len(data) > 0:
+        ip_list = re.findall(r'[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}', data)
+        if ip_list is not None and len(ip_list) > 0:
+            ip_address = ip_list[0]
+
+    if ip_address is None:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 53))
+        ip_address = s.getsockname()[0]
+        s.close()
+
+    return ip_address
 
 def get_random_free_port():
     while True:
