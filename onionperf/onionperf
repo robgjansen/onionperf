@@ -438,7 +438,7 @@ def type_str_ip_in(value):
     ip = re.match(r'[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}', s)
     if ip is None:
         raise argparse.ArgumentTypeError("IP address '%s' is not a valid address" % s)
-    return ip
+    return ip.group(0)
 
 # a custom action for passing in experimental data directories when plotting
 class PathStringArgsAction(argparse.Action):
