@@ -87,21 +87,20 @@ class TorperfModel(GeneratableTGenModel):
         # the file sizes and downloading it from one of the servers in the server pool
         g.add_edge("pause", "pause")
 
-        # these are chosen with equal probability, change edge 'weight' attributes to adjust probability
-        g.add_edge("pause", "transfer50k", weight="1.0")
-        g.add_edge("pause", "transfer1m", weight="1.0")
+        # these are chosen with weighted probability, change edge 'weight' attributes to adjust probability
+        g.add_edge("pause", "transfer50k", weight="12.0")
+        g.add_edge("pause", "transfer1m", weight="2.0")
         g.add_edge("pause", "transfer5m", weight="1.0")
 
         return g
 
-def dump_example_tgen_torperf_model(domain_name, onion_name):                                                                                                                        
+def dump_example_tgen_torperf_model(domain_name, onion_name):
     # the server listens on 8888, the client uses Tor to come back directly, and using a hidden serv
     server = ListenModel(tgen_port="8888")
     public_server_str = "{0}:8888".format(domain_name)
     onion_server_str = "{0}:8890".format(onion_name)
     client = TorperfModel(tgen_port="8889", socksproxy="localhost:9001", tgen_servers=[public_server_str, onion_server_str])
-    
+
     # save to specified paths
     server.dump_to_file("tgen.server.torperf.graphml.xml")
     client.dump_to_file("tgen.client.torperf.graphml.xml")
-
