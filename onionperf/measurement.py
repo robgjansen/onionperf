@@ -33,7 +33,11 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
     # launch or re-launch our sub process until we are told to stop
     # if we fail too many times in too short of time, give up and exit
     failure_times = []
+    pause_time_seconds = 0
     while done_ev.is_set() is False:
+        if pause_time_seconds > 0:
+            time.sleep(pause_time_seconds)
+
         stdin_handle = subprocess.PIPE if send_stdin is not None else None
         subp = subprocess.Popen(shlex.split(cmd), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=stdin_handle)
 
@@ -88,6 +92,7 @@ def watchdog_thread_task(cmd, cwd, writable, done_ev, send_stdin, ready_search_s
                 failure_times.pop(0)
             # add a new failure that just occurred
             failure_times.append(now)
+            pause_time_seconds = 30
 
         # the subp should be stopped now, flush any remaining lines
         #subp.stdout.close() # results in concurrent write error
