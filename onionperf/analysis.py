@@ -145,68 +145,84 @@ class Analysis(object):
                 output.open()
 
                 for xfer_db in xfers_by_filesize[filesize]:
-                    # sanity checks
-                    is_missing_keys = False
-                    for key in ['proxy_choice', 'proxy_request', 'proxy_response']:
-                        if key not in xfer_db['elapsed_seconds']:
-                            logging.warning("torperf requires time key '{0}', skipping transfer '{1}'".format(key, xfer_db['transfer_id']))
-                            is_missing_keys = True
-                    if is_missing_keys:
+                    # if any keys are missing, log a warning
+                    try:
+                        d = {}
+
+                        d['SOURCE'] = nickname
+                        d['ENDPOINTLOCAL'] = xfer_db['endpoint_local']
+                        d['ENDPOINTPROXY'] = xfer_db['endpoint_proxy']
+                        d['ENDPOINTREMOTE'] = xfer_db['endpoint_remote']
+                        d['HOSTNAMELOCAL'] = xfer_db['hostname_local']
+                        d['HOSTNAMEREMOTE'] = xfer_db['hostname_remote']
+
+                        d['FILESIZE'] = xfer_db['filesize_bytes']
+                        d['READBYTES'] = xfer_db['total_bytes_read']
+                        d['WRITEBYTES'] = xfer_db['total_bytes_write']
+
+                        def ts_to_str(ts): return"{0:.02f}".format(ts)
+
+                        # initialize times to 0.0
+                        time_keys = ['START', 'SOCKET', 'CONNECT', 'NEGOTIATE', 'REQUEST', 'RESPONSE', 'DATAREQUEST', 'DATARESPONSE', 'DATACOMPLETE', 'LAUNCH']
+                        for i in range(1, 10):
+                            time_keys.append('DATAPERC{}0'.format(i))
+                        for key in time_keys:
+                            d[key] = 0.0
+
+                        # since these are initialized to 0, it's OK if we are missing some times, e.g. due to read error
+                        if 'unix_ts_start' in xfer_db:
+                            d['START'] = ts_to_str(xfer_db['unix_ts_start'])
+                            if 'elapsed_seconds' in xfer_db:
+                                if 'socket_create' in xfer_db['elapsed_seconds']:
+                                    d['SOCKET'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_create'])
+                                elif 'socket_connect' in xfer_db['elapsed_seconds']:
+                                    d['CONNECT'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_connect'])
+                                elif 'proxy_choice' in xfer_db['elapsed_seconds']:
+                                    d['NEGOTIATE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_choice'])
+                                elif 'proxy_request' in xfer_db['elapsed_seconds']:
+                                    d['REQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_request'])
+                                elif 'proxy_response' in xfer_db['elapsed_seconds']:
+                                    d['RESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_response'])
+                                elif 'command' in xfer_db['elapsed_seconds']:
+                                    d['DATAREQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['command'])
+                                elif 'response' in xfer_db['elapsed_seconds']:
+                                    d['DATARESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['response'])
+
+                                if 'payload_progress' in xfer_db['elapsed_seconds']:
+                                    # set DATAPERC[10,20,...,90]
+                                    for decile in sorted(xfer_db['elapsed_seconds']['payload_progress'].keys()):
+                                        if decile in xfer_db['elapsed_seconds']['payload_progress'] and xfer_db['elapsed_seconds']['payload_progress'][decile] is not None:
+                                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
+
+                                if 'last_byte' in xfer_db['elapsed_seconds']:
+                                    d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
+
+                        # could be ioerror or timeout or etc, but i dont think torperf distinguishes these
+                        d['DIDTIMEOUT'] = 1 if xfer_db['is_error'] is True else 0
+
+                        # now get the tor parts
+                        srcport = int(xfer_db['endpoint_local'].split(':')[2])
+                        if srcport in streams_by_srcport:
+                            stream_db = streams_by_srcport[srcport]
+                            circid = int(stream_db['circuit_id'])
+                            if circid in circuits:
+                                circuit_db = circuits[circid]
+
+                                d['LAUNCH'] = circuit_db['unix_ts_start']
+                                d['PATH'] = ','.join([item[0].split('~')[0] for item in circuit_db['path']])
+                                d['BUILDTIMES'] = ','.join([str(item[1]) for item in circuit_db['path']])
+                                d['TIMEOUT'] = circuit_db['build_timeout'] if 'build_timeout' in circuit_db else None
+                                d['QUANTILE'] = circuit_db['build_quantile'] if 'build_quantile' in circuit_db else None
+                                d['CIRC_ID'] = circid
+                                d['USED_AT'] = stream_db['unix_ts_end']
+                                d['USED_BY'] = int(stream_db['stream_id'])
+
+                        output.write("@type torperf 1.0\r\n")
+                        output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
+                        output.write("{0}\r\n".format(output_str))
+                    except KeyError, e:
+                        logging.warning("KeyError while exporting torperf file, missing key '{0}', skipping transfer '{1}'".format(str(e), xfer_db['transfer_id']))
                         continue
-
-                    d = {}
-
-                    d['SOURCE'] = nickname
-                    d['ENDPOINTLOCAL'] = xfer_db['endpoint_local']
-                    d['ENDPOINTPROXY'] = xfer_db['endpoint_proxy']
-                    d['ENDPOINTREMOTE'] = xfer_db['endpoint_remote']
-                    d['HOSTNAMELOCAL'] = xfer_db['hostname_local']
-                    d['HOSTNAMEREMOTE'] = xfer_db['hostname_remote']
-
-                    d['FILESIZE'] = xfer_db['filesize_bytes']
-                    d['READBYTES'] = xfer_db['total_bytes_read']
-                    d['WRITEBYTES'] = xfer_db['total_bytes_write']
-
-                    def ts_to_str(ts): return"{0:.02f}".format(ts)
-
-                    d['START'] = ts_to_str(xfer_db['unix_ts_start'])
-                    d['SOCKET'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_create'])
-                    d['CONNECT'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_connect'])
-                    d['NEGOTIATE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_choice'])
-                    d['REQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_request'])
-                    d['RESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_response'])
-                    d['DATAREQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['command'])
-                    d['DATARESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['response'])
-
-                    # set DATAPERC[10,20,...,90]
-                    for decile in sorted(xfer_db['elapsed_seconds']['payload_progress'].keys()):
-                        if xfer_db['elapsed_seconds']['payload_progress'][decile] is not None:
-                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
-
-                    d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
-                    # could be ioerror or timeout or etc, but i dont think torperf distinguishes these
-                    d['DIDTIMEOUT'] = 1 if xfer_db['is_error'] is True else 0
-
-                    # now get the tor parts
-                    srcport = int(xfer_db['endpoint_local'].split(':')[2])
-                    if srcport in streams_by_srcport:
-                        stream_db = streams_by_srcport[srcport]
-                        circid = int(stream_db['circuit_id'])
-                        if circid in circuits:
-                            circuit_db = circuits[circid]
-
-                            d['LAUNCH'] = circuit_db['unix_ts_start']
-                            d['PATH'] = ','.join([item[0].split('~')[0] for item in circuit_db['path']])
-                            d['BUILDTIMES'] = ','.join([str(item[1]) for item in circuit_db['path']])
-                            d['TIMEOUT'] = circuit_db['build_timeout'] if 'build_timeout' in circuit_db else None
-                            d['QUANTILE'] = circuit_db['build_quantile'] if 'build_quantile' in circuit_db else None
-                            d['CIRC_ID'] = circid
-                            d['USED_AT'] = stream_db['unix_ts_end']
-                            d['USED_BY'] = int(stream_db['stream_id'])
-
-                    output.write("@type torperf 1.0\r\n")
-                    output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
-                    output.write("{0}\r\n".format(output_str))
 
                 output.close()
                 logging.info("done!")
