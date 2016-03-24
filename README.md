@@ -13,44 +13,94 @@ can later be used to visualize changes in Tor client performance over time.
 
 For more information, see https://github.com/robgjansen/onionperf.
 
-### Install Dependencies
+### Get OnionPerf
+
+```
+git clone https://github.com/robgjansen/onionperf.git
+cd onionperf
+```
+
+### Install System Dependencies
 
   + **Tor** (>= v0.2.7.3-rc): libevent, openssl
   + **TGen** (Shadow >= v1.11.1): cmake, glib2, igraph
-  + **OnionPerf**: python, python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
+  + **OnionPerf**: python
 
-The easiest way to satisfy all dependencies is to use a package manager.
+The easiest way to satisfy all system dependencies is to use a package manager.
 
 Fedora/RedHat:
 
 ```
-sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent libevent-devel openssl openssl-devel
-sudo yum install python python-stem python-twisted python-lxml python-networkx python-matplotlib numpy scipy
+sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent libevent-devel openssl openssl-devel python
 ```
 
 Ubuntu/Debian:
 
 ```
-sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev
-sudo apt-get install python python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy python-scipy
+sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev python
 ```
 
-Python modules can be installed with `pip` if you satisfy the requirements of
-the modules. The module requirements for each OnionPerf subcommand are as follows:
+### Install Python modules
+
+  + **OnionPerf** python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
+
+#### Option 1: Package Manager
+
+The easiest way to satisfy all system dependencies is to use a package manager.
+
+```
+# Fedora/RedHat:
+sudo yum install python-stem python-twisted python-lxml python-networkx python-matplotlib numpy scipy
+# Ubuntu/Debian:
+sudo apt-get install python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy python-scipy
+```
+
+#### Option 2: pip
+
+Python modules can also be installed using `pip`. The python modules that are required for each
+OnionPerf subcommand are as follows:
 
   + `onionperf monitor`: stem
   + `onionperf measure`: stem, lxml, twisted, networkx
   + `onionperf analyze`: stem
   + `onionperf visualize`: scipy, numpy, pylab, matplotlib
 
+You must first satisfy the system/library requirements of each of the python modules.
+
+**Note**: the following commands may not contain all requirements; please update if you find more!
+
+```
+# Fedora/RedHat:
+sudo yum install libxml2 libxml2-devel libxslt libxslt-devel
+# Ubuntu/Debian:
+sudo apt-get install libxml2 libxml2-dev libxslt1 libxslt1-dev
+```
+
+It is recommended to use virtual environments to keep all of the dependencies self-contained and
+to avoid conflicts with your other python projects.
+
+```
+pip install virtualenv
+virtualenv --no-site-packages venv
+source venv/bin/activate
+pip install -r requirements.txt # installs all required python modules for all OnionPerf subcommands
+deactivate
+```
+
+If you don't want to use virtualenv, you can install with:
+
+```
+pip install stem lxml twisted networkx scipy numpy matplotlib
+```
+
 **Note**: You may want to skip installing numpy and matplotlib if you don't
 plan to use the `visualize` subcommand, since those tend to require several
 large dependencies.
 
+### Build Tor
+
 **Note**: You can install Tor via the package manager as well, though the
 preferred method is to build from source.
-
-### Build Tor
 
 We need at least version 0.2.7.3-rc
 
@@ -77,11 +127,25 @@ cmake .. -DSKIP_SHADOW=ON -DCMAKE_MODULE_PATH=`pwd`/../../../../cmake/
 make
 ```
 
-### Run OnionPerf
+### Build and Run OnionPerf
+
+If using pip and virtualenv (run from onionperf base directory):
 
 ```
-git clone https://github.com/robgjansen/onionperf.git
-cd onionperf
+source venv/bin/activate
+pip install -I .
+deactivate
+```
+
+If using just pip:
+
+```
+pip install -I .
+```
+
+Otherwise:
+
+```
 python setup.py build
 python setup.py install
 ```
