@@ -28,15 +28,10 @@ cd onionperf
 
 The easiest way to satisfy all system dependencies is to use a package manager.
 
-Fedora/RedHat:
-
 ```
+#Fedora/RedHat:
 sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent libevent-devel openssl openssl-devel python
-```
-
-Ubuntu/Debian:
-
-```
+# Ubuntu/Debian:
 sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev python
 ```
 
