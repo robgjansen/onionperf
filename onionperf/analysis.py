@@ -175,17 +175,17 @@ class Analysis(object):
                             if 'elapsed_seconds' in xfer_db:
                                 if 'socket_create' in xfer_db['elapsed_seconds']:
                                     d['SOCKET'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_create'])
-                                elif 'socket_connect' in xfer_db['elapsed_seconds']:
+                                if 'socket_connect' in xfer_db['elapsed_seconds']:
                                     d['CONNECT'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['socket_connect'])
-                                elif 'proxy_choice' in xfer_db['elapsed_seconds']:
+                                if 'proxy_choice' in xfer_db['elapsed_seconds']:
                                     d['NEGOTIATE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_choice'])
-                                elif 'proxy_request' in xfer_db['elapsed_seconds']:
+                                if 'proxy_request' in xfer_db['elapsed_seconds']:
                                     d['REQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_request'])
-                                elif 'proxy_response' in xfer_db['elapsed_seconds']:
+                                if 'proxy_response' in xfer_db['elapsed_seconds']:
                                     d['RESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['proxy_response'])
-                                elif 'command' in xfer_db['elapsed_seconds']:
+                                if 'command' in xfer_db['elapsed_seconds']:
                                     d['DATAREQUEST'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['command'])
-                                elif 'response' in xfer_db['elapsed_seconds']:
+                                if 'response' in xfer_db['elapsed_seconds']:
                                     d['DATARESPONSE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['response'])
 
                                 if 'payload_progress' in xfer_db['elapsed_seconds']:
