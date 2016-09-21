@@ -8,7 +8,7 @@ served and fetched on localhost using two TGen (traffic generator)
 processes, and is transferred through Tor using Tor client processes and
 an ephemeral Tor Onion Service. Tor control information and TGen
 performance statistics are logged to disk, analyzed once per day to
-produce a json stats database and files that can feek into Torperf, and
+produce a json stats database and files that can feed into Torperf, and
 can later be used to visualize changes in Tor client performance over time.
 
 For more information, see https://github.com/robgjansen/onionperf.
@@ -34,6 +34,8 @@ sudo yum install gcc cmake make glib2 glib2-devel igraph igraph-devel libevent l
 # Ubuntu/Debian:
 sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigraph0-dev libevent libevent-dev openssl openssl-dev python
 ```
+
+**Note**: in newer distributions, `libevent` may be called `libevent-2.0` and `openssl-dev` may be called `libssl-dev`.
 
 ### Install Python modules
 
