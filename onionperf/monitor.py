@@ -42,7 +42,14 @@ class TorMonitor(object):
                     try:
                         torctl.add_event_listener(event_handler, EventType[e])
                     except:
+                        self.__log(self.writable, "[WARNING] event %s is recognized by stem but not by tor\n" % e)
                         pass
+                else:
+                    try:
+                        torctl.add_event_listener(event_handler, e)
+                    except:
+                        self.__log(self.writable, "[ERROR] unrecognized event %s in tor\n" % e)
+                        return
 
             # let stem run its threads and log all of the events, until user interrupts
             try:
