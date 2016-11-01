@@ -15,6 +15,9 @@ LINEFORMATS = "k-,r-,b-,g-,c-,m-,y-,k--,r--,b--,g--,c--,m--,y--,k:,r:,b:,g:,c:,m
 def make_path(path):
     p = os.path.abspath(os.path.expanduser(path))
     if not os.path.exists(p):
+        # if the path is a file, then make sure the parent dir exists
+        if os.path.isfile(p):
+            p = os.path.dirname(p)
         os.makedirs(p)
     return p
 
