@@ -70,7 +70,7 @@ You must first satisfy the system/library requirements of each of the python mod
 # Fedora/RedHat:
 sudo yum install python-devel libxml2 libxml2-devel libxslt libxslt-devel libpng libpng-devel freetype freetype-devel
 # Ubuntu/Debian:
-sudo apt-get install python-devel libxml2 libxml2-dev libxslt1 libxslt1-dev libpng libpng-devel freetype freetype-devel 
+sudo apt-get install python-devel libxml2 libxml2-dev libxslt1 libxslt1-dev libpng libpng-devel freetype freetype-devel
 ```
 
 It is recommended to use virtual environments to keep all of the dependencies self-contained and
@@ -185,6 +185,30 @@ log files, and analyze the latest results to produce a `type torperf 1.0` stats 
 as well as an `onionperf.analysis.json` stats file. These are placed in the twistd docroot
 and are available through the web interface or at `onionperf-data/twistd/docroot`.
 
+While OnionPerf is running a number of `Warning` messages might come out. E.g.:
+
+```
+2016-12-21 12:15:17 1482318917.473774 [onionperf] [WARNING] command
+'/home/rob/shadow/src/plugin/shadow-plugin-tgen/build/tgen
+/home/rob/onionperf/onionperf-data/tgen-server/tgen.graphml.xml'
+finished before expected"
+```
+
+More specifically, this warning indicates that the tgen server watchdog thread
+detected that the tgen server prematurely exited. The watchdog should have spun
+up another tgen server to replace the one that died. If more than 10 failures
+happen within 60 minutes, then the watchdog will give up and exit, and at that
+point you should stop seeing the heartbeat message.
+
+To find out why this is happening you should check the specific component logs.
+In this particular case tgen-server log file revealed the problem:
+
+```
+2016-12-20 18:46:29 1482255989.329712 [critical] [shd-tgen-server.c:94] [tgenserver_new] bind(): socket 5 returned -1 error 98: Address already in use
+```
+
+The log indicated that port 8080 was already in use by another process.
+
 ### Analyze/Visualize Results
 
 OnionPerf runs the data it collects through `analyze` mode every night at midnight to
@@ -207,6 +231,38 @@ onionperf visualize --data onionperf.analysis.json "onionperf-test"
 ```
 
 This will save new PDFs containing several graphs in the current directory.
+
+Log files for each OnionPerf component (tgen client, tgen server, tor client, tor
+server, twistd server) are stored in their own directory, under `onionperf-data`.
+While it is running OnionPerf output is saved to a standard log file, e.g.,
+tgen.server.log. Every night at midnight, if OnionPerf is running, each log file
+is be moved to a log_rotate directory and renamed to include a timestamp. Each
+component has its own collection of log files with timestamps in their log_rotate
+directories.
+
+### Understanding measurements
+
+OnionPerf produces a number of graphs and statistics. These are:
+
+- Number of transfer AUTH errors, each client
+
+- Number of transfer PROXY errors, each client
+
+- Number of transfer AUTH errors, all clients over time
+
+- Number of transfer PROXY errors, all clients over time
+
+- Bytes transferred before AUTH error, all downloads
+
+- Bytes transferred before PROXY error, all downloads
+
+- Median bytes transferred before AUTH error, each client
+
+- Median bytes transferred before PROXY error, each client
+
+- Mean bytes transferred before AUTH error, each client
+
+- Mean bytes transferred before PROXY error, each client
 
 ### Contribute
 

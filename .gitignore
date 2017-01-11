@@ -1,1 +1,5 @@
 /.onionperf/*
+onionperf-data
+venv
+*.json.xz
+*.pdf
