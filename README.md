@@ -242,7 +242,9 @@ directories.
 
 ### Understanding measurements
 
-OnionPerf produces a number of graphs and statistics. These are:
+OnionPerf produces a number of graphs and statistics per component. These include:
+
+## tgen
 
 - Number of transfer AUTH errors, each client
 
@@ -263,6 +265,20 @@ OnionPerf produces a number of graphs and statistics. These are:
 - Mean bytes transferred before AUTH error, each client
 
 - Mean bytes transferred before PROXY error, each client
+
+## Tor
+
+- 60 second moving average throughput, read, all relays
+
+- 1 second throughput, read, all relays
+
+- 1 second throughput, read, each relay
+
+- 60 second moving average throughput, write, all relays
+
+- 1 second throughput, write, all relays
+
+- 1 second throughput, write, each relay
 
 ### Contribute
 
