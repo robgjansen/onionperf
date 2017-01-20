@@ -11,7 +11,7 @@ performance statistics are logged to disk, analyzed once per day to
 produce a json stats database and files that can feed into Torperf, and
 can later be used to visualize changes in Tor client performance over time.
 
-For more information, see https://github.com/robgjansen/onionperf
+For more information, see https://github.com/robgjansen/onionperf  
 For a dockerized setup, see https://github.com/hiromipaw/onionperf-docker
 
 ### Get OnionPerf
