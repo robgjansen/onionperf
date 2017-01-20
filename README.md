@@ -240,6 +240,11 @@ is be moved to a log_rotate directory and renamed to include a timestamp. Each
 component has its own collection of log files with timestamps in their log_rotate
 directories.
 
+Generated log are also accessable through the twistd web interface accessible at
+`localhost:8081`. Collected measurements and analysis are accessible in `json` and
+`tpf` format (Torperf). Information regarding how to read Torperf's measurements
+results can be found at: https://collector.torproject.org/#torperf.
+
 ### Understanding measurements
 
 OnionPerf produces a number of graphs and statistics per component. These include:
