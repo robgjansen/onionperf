@@ -204,7 +204,7 @@ class Analysis(object):
                         srcport = int(xfer_db['endpoint_local'].split(':')[2])
                         if srcport in streams_by_srcport:
                             stream_db = streams_by_srcport[srcport]
-                            circid = int(stream_db['circuit_id'])
+                            circid = int(stream_db['circuit_id'] or 0)
                             if circid in circuits:
                                 circuit_db = circuits[circid]
 
