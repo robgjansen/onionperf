@@ -208,7 +208,7 @@ class Measurement(object):
                 general_writables.append(self.__start_tgen_server(server_tgen_listen_port))
 
             if do_onion:
-                tor_writable, torctl_writable = self.__start_tor_server(server_tor_ctl_port, server_tor_socks_port, {server_tgen_listen_port:client_tgen_connect_port})
+                tor_writable, torctl_writable = self.__start_tor_server(server_tor_ctl_port, server_tor_socks_port, {client_tgen_connect_port:server_tgen_listen_port})
                 general_writables.append(tor_writable)
                 general_writables.append(torctl_writable)
 
