@@ -134,8 +134,12 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
             # handle tgen and tor writables specially, and do analysis
             if tgen_writable is not None or torctl_writable is not None:
                 try:
+
+                    # get our public ip address, do this every night in case it changes
+                    public_measurement_ip_guess = util.get_ip_address()
+
                     # set up the analysis object with our log files
-                    anal = analysis.Analysis(nickname=nickname)
+                    anal = analysis.Analysis(nickname=nickname, ip_address=public_measurement_ip_guess)
                     if tgen_writable is not None:
                         anal.add_tgen_file(tgen_writable.rotate_file())
                     if torctl_writable is not None:

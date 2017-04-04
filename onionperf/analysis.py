@@ -21,8 +21,9 @@ import util
 
 class Analysis(object):
 
-    def __init__(self, nickname=None):
+    def __init__(self, nickname=None, ip_address=None):
         self.nickname = nickname
+        self.measurement_ip = ip_address
         self.hostname = gethostname().split('.')[0]
         self.json_db = {'type':'onionperf', 'version':1.0, 'data':{}}
         self.tgen_filepaths = []
@@ -55,11 +56,20 @@ class Analysis(object):
                 for filepath in filepaths:
                     logging.info("parsing log file at {0}".format(filepath))
                     parser.parse(util.DataSource(filepath), do_simple=do_simple)
-                parsed_name = parser.get_name()
-                n = self.nickname
-                if n is None:
-                    n = parsed_name if parsed_name is not None else self.hostname
-                self.json_db['data'].setdefault(n, {}).setdefault(json_db_key, parser.get_data())
+
+                if self.nickname is None:
+                    parsed_name = parser.get_name()
+                    if parsed_name is not None:
+                        self.nickname = parsed_name
+                    elif self.hostname is not None:
+                        self.nickname = self.hostname
+                    else:
+                        self.nickname = "unknown"
+
+                if self.measurement_ip is None:
+                    self.measurement_ip = "unknown"
+
+                self.json_db['data'].setdefault(self.nickname, {'measurement_ip': self.measurement_ip}).setdefault(json_db_key, parser.get_data())
 
     def merge(self, analysis):
         for nickname in analysis.json_db['data']:
@@ -150,6 +160,7 @@ class Analysis(object):
                         d = {}
 
                         d['SOURCE'] = nickname
+                        d['SOURCEADDRESS'] = self.measurement_ip
                         d['ENDPOINTLOCAL'] = xfer_db['endpoint_local']
                         d['ENDPOINTPROXY'] = xfer_db['endpoint_proxy']
                         d['ENDPOINTREMOTE'] = xfer_db['endpoint_remote']

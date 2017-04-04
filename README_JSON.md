@@ -7,6 +7,7 @@ The structure is given here with variable keys marked as such.
     {
       "data": { # generic keyword
         "phantomtrain": { # nickname of the OnionPerf client, hostname if not set
+          "measurement_ip" : "192.168.1.1", # public-facing IP address of the machine used for the measurements
           "tgen": { # to indicate data from TGen
             "transfers": { # the records for transfers TGen attempted
               "transfer1m:1": { # the id of a single transfer
