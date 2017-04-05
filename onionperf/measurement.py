@@ -129,7 +129,7 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
         if (next_midnight - utcnow).total_seconds() < 0:
             # handle the general writables we are watching
             for w in writables:
-                w.rotate_file()
+                w.rotate_file(filename_datetime=next_midnight)
 
             # handle tgen and tor writables specially, and do analysis
             if tgen_writable is not None or torctl_writable is not None:
@@ -141,17 +141,16 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
                     # set up the analysis object with our log files
                     anal = analysis.Analysis(nickname=nickname, ip_address=public_measurement_ip_guess)
                     if tgen_writable is not None:
-                        anal.add_tgen_file(tgen_writable.rotate_file())
+                        anal.add_tgen_file(tgen_writable.rotate_file(filename_datetime=next_midnight))
                     if torctl_writable is not None:
-                        anal.add_torctl_file(torctl_writable.rotate_file())
+                        anal.add_torctl_file(torctl_writable.rotate_file(filename_datetime=next_midnight))
 
                     # run the analysis, i.e. parse the files
-                    anal.analyze(do_simple=False)
+                    anal.analyze(do_simple=False, date_filter=next_midnight.date())
 
                     # save the results in onionperf and torperf format in the twistd docroot
-                    anal_filename = "{0:04d}-{1:02d}-{2:02d}.onionperf.analysis.json.xz".format(next_midnight.year, next_midnight.month, next_midnight.day)
-                    anal.save(filename=anal_filename, output_prefix=docroot, do_compress=True)
-                    anal.export_torperf_version_1_0(output_prefix=docroot, datetimestamp=next_midnight, do_compress=False)
+                    anal.save(output_prefix=docroot, do_compress=True)
+                    anal.export_torperf_version_1_0(output_prefix=docroot, do_compress=False)
 
                     # update the xml index in docroot
                     generate_docroot_index(docroot)

@@ -28,6 +28,8 @@ class Analysis(object):
         self.json_db = {'type':'onionperf', 'version':1.0, 'data':{}}
         self.tgen_filepaths = []
         self.torctl_filepaths = []
+        self.date_filter = None
+        self.did_analysis = False
 
     def add_tgen_file(self, filepath):
         self.tgen_filepaths.append(filepath)
@@ -50,8 +52,15 @@ class Analysis(object):
         except:
             return None
 
-    def analyze(self, do_simple=True):
-        for (filepaths, parser, json_db_key) in [(self.tgen_filepaths, TGenParser(), 'tgen'), (self.torctl_filepaths, TorCtlParser(), 'tor')]:
+    def analyze(self, do_simple=True, date_filter=None):
+        if self.did_analysis:
+            return
+
+        self.date_filter = date_filter
+        tgen_parser = TGenParser(date_filter=self.date_filter)
+        torctl_parser = TorCtlParser(date_filter=self.date_filter)
+
+        for (filepaths, parser, json_db_key) in [(self.tgen_filepaths, tgen_parser, 'tgen'), (self.torctl_filepaths, torctl_parser, 'tor')]:
             if len(filepaths) > 0:
                 for filepath in filepaths:
                     logging.info("parsing log file at {0}".format(filepath))
@@ -71,6 +80,8 @@ class Analysis(object):
 
                 self.json_db['data'].setdefault(self.nickname, {'measurement_ip': self.measurement_ip}).setdefault(json_db_key, parser.get_data())
 
+        self.did_analysis = True
+
     def merge(self, analysis):
         for nickname in analysis.json_db['data']:
             if nickname in self.json_db['data']:
@@ -79,7 +90,13 @@ class Analysis(object):
             else:
                 self.json_db['data'][nickname] = analysis.json_db['data'][nickname]
 
-    def save(self, filename="onionperf.analysis.json.xz", output_prefix=os.getcwd(), do_compress=True, version=1.0):
+    def save(self, filename=None, output_prefix=os.getcwd(), do_compress=True, version=1.0):
+        if filename is None:
+            if self.date_filter is None:
+                filename = "onionperf.analysis.json.xz"
+            else:
+                filename = "{0:04d}-{1:02d}-{2:02d}.onionperf.analysis.json.xz".format(self.date_filter.year, self.date_filter.month, self.date_filter.day)
+
         filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(output_prefix, filename)))
         if not os.path.exists(output_prefix):
             os.makedirs(output_prefix)
@@ -121,14 +138,10 @@ class Analysis(object):
             analysis_instance.json_db = db
             return analysis_instance
 
-    def export_torperf_version_1_0(self, output_prefix=os.getcwd(), datetimestamp=None, do_compress=False):
+    def export_torperf_version_1_0(self, output_prefix=os.getcwd(), do_compress=False):
         # export file in `@type torperf 1.0` format: https://collector.torproject.org/#type-torperf
         if not os.path.exists(output_prefix):
             os.makedirs(output_prefix)
-
-        if datetimestamp is None:
-            datetimestamp = datetime.datetime.utcnow()
-        datestr = "{0:04d}-{1:02d}-{2:02d}".format(datetimestamp.year, datetimestamp.month, datetimestamp.day)
 
         for nickname in self.json_db['data']:
             if 'tgen' not in self.json_db['data'][nickname] or 'transfers' not in self.json_db['data'][nickname]['tgen']:
@@ -138,15 +151,24 @@ class Analysis(object):
             for xfer_db in self.json_db['data'][nickname]['tgen']['transfers'].values():
                 xfers_by_filesize.setdefault(xfer_db['filesize_bytes'], []).append(xfer_db)
 
-            streams_by_srcport = {}
-            for streams_db in self.json_db['data'][nickname]['tor']['streams'].values():
-                if 'source' in streams_db:
-                    srcport = int(streams_db['source'].split(':')[1])
-                    streams_by_srcport[srcport] = streams_db
-            circuits = self.json_db['data'][nickname]['tor']['circuits']
+            streams_by_srcport, circuits = {}, []
+            if 'tor' in self.json_db['data'][nickname]:
+                if 'streams' in self.json_db['data'][nickname]['tor']:
+                    for streams_db in self.json_db['data'][nickname]['tor']['streams'].values():
+                        if 'source' in streams_db:
+                            srcport = int(streams_db['source'].split(':')[1])
+                            streams_by_srcport[srcport] = streams_db
+                if 'circuits' in self.json_db['data'][nickname]['tor']:
+                    circuits = self.json_db['data'][nickname]['tor']['circuits']
 
             for filesize in xfers_by_filesize:
-                filepath = "{0}/{1}-{2}-{3}.tpf{4}".format(output_prefix, nickname, filesize, datestr, '.xz' if do_compress else '')
+                # build the filename
+                filename_prefix = "{}-{}".format(nickname, filesize)
+                filename_middle = "-{0:04d}-{1:02d}-{2:02d}".format(self.date_filter.year, self.date_filter.month, self.date_filter.day) if self.date_filter is not None else ""
+                filename_suffix = ".tpf.xz" if do_compress else ".tpf"
+                filename = "{}{}{}".format(filename_prefix, filename_middle, filename_suffix)
+
+                filepath = "{}/{}".format(output_prefix, filename)
 
                 logging.info("saving analysis results to {0}".format(filepath))
 
@@ -389,17 +411,37 @@ class Parser(object):
 
 class TGenParser(Parser):
 
-    def __init__(self):
+    def __init__(self, date_filter=None):
+        ''' date_filter should be given in UTC '''
         self.state = {}
         self.transfers = {}
         self.transfers_summary = {'time_to_first_byte':{}, 'time_to_last_byte':{}, 'errors':{}}
         self.name = None
+        self.date_filter = date_filter
+
+    def __is_date_valid(self, date_to_check):
+        if self.date_filter is None:
+            # we are not asked to filter, so every date is valid
+            return True
+        else:
+            # we are asked to filter, so the line is only valid if the date matches the filter
+            # both the filter and the unix timestamp should be in UTC at this point
+            return util.do_dates_match(self.date_filter, date_to_check)
 
     def __parse_line(self, line, do_simple):
         if self.name is None and re.search("Initializing traffic generator on host", line) is not None:
             self.name = line.strip().split()[11]
 
-        elif not do_simple and re.search("state\sRESPONSE\sto\sstate\sPAYLOAD", line) is not None:
+        if self.date_filter is not None:
+            parts = line.split(' ', 3)
+            if len(parts) < 4: # the 3rd is the timestamp, the 4th is the rest of the line
+                return True
+            unix_ts = float(parts[2])
+            line_date = datetime.datetime.utcfromtimestamp(unix_ts).date()
+            if not self.__is_date_valid(line_date):
+                return True
+
+        if not do_simple and re.search("state\sRESPONSE\sto\sstate\sPAYLOAD", line) is not None:
             # another run of tgen starts the id over counting up from 1
             # if a prev transfer with the same id did not complete, we can be sure it never will
             parts = line.strip().split()
@@ -590,7 +632,8 @@ class Circuit(object):
 
 class TorCtlParser(Parser):
 
-    def __init__(self):
+    def __init__(self, date_filter=None):
+        ''' date_filter should be given in UTC '''
         self.do_simple = True
         self.bandwidth_summary = {'bytes_read':{}, 'bytes_written':{}}
         self.circuits_state = {}
@@ -603,6 +646,7 @@ class TorCtlParser(Parser):
         self.boot_succeeded = False
         self.build_timeout_last = None
         self.build_quantile_last = None
+        self.date_filter = date_filter
 
     def __handle_circuit(self, event, arrival_dt):
         # first make sure we have a circuit object
@@ -707,6 +751,15 @@ class TorCtlParser(Parser):
         elif isinstance(event, BuildTimeoutSetEvent):
             self.__handle_buildtimeout(event, arrival_dt)
 
+    def __is_date_valid(self, date_to_check):
+        if self.date_filter is None:
+            # we are not asked to filter, so every date is valid
+            return True
+        else:
+            # we are asked to filter, so the line is only valid if the date matches the filter
+            # both the filter and the unix timestamp should be in UTC at this point
+            return util.do_dates_match(self.date_filter, date_to_check)
+
     def __parse_line(self, line):
         if not self.boot_succeeded:
             if re.search("Starting\storctl\sprogram\son\shost", line) is not None:
@@ -724,11 +777,17 @@ class TorCtlParser(Parser):
             timestamps, sep, raw_event_str = line.partition(" 650 ")
             if sep == '':
                 return True
-            event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str))
-            convert('EVENT', event)
 
             # event.arrived_at is also available but at worse granularity
             unix_ts = float(timestamps.strip().split()[2])
+
+            # check if we should ignore the line
+            line_date = datetime.datetime.utcfromtimestamp(unix_ts).date()
+            if not self.__is_date_valid(line_date):
+                return True
+
+            event = ControlMessage.from_str("{0} {1}".format(sep.strip(), raw_event_str))
+            convert('EVENT', event)
             self.__handle_event(event, unix_ts)
         return True
 

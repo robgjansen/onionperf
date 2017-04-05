@@ -95,6 +95,15 @@ def which(program):
 def timestamp_to_seconds(stamp):  # unix timestamp
     return float(stamp)
 
+def do_dates_match(date1, date2):
+    year_matches = True if date1.year == date2.year else False
+    month_matches = True if date1.month == date2.month else False
+    day_matches = True if date1.day == date2.day else False
+    if year_matches and month_matches and day_matches:
+        return True
+    else:
+        return False
+
 def get_ip_address():
     ip_address = None
 
@@ -228,13 +237,13 @@ class FileWritable(Writable):
             self.ddproc.wait()
             self.ddproc = None
 
-    def rotate_file(self):
+    def rotate_file(self, filename_datetime=datetime.datetime.now()):
         self.lock.acquire()
 
         # build up the new filename with an embedded timestamp
         base = os.path.basename(self.filename)
         base_noext = os.path.splitext(os.path.splitext(base)[0])[0]
-        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        ts = filename_datetime.strftime("%Y-%m-%d_%H:%M:%S")
         new_base = base.replace(base_noext, "{0}_{1}".format(base_noext, ts))
         new_filename = self.filename.replace(base, "log_archive/{0}".format(new_base))
 
