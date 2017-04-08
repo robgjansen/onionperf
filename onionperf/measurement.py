@@ -220,7 +220,8 @@ class Measurement(object):
                 general_writables.append(tor_writable)
 
             server_urls = []
-            if do_onion and self.hs_service_id is not None: server_urls.append("{0}.onion:{1}".format(self.hs_service_id, server_tgen_listen_port))
+            if do_onion and self.hs_service_id is not None:
+                server_urls.append("{0}.onion:{1}".format(self.hs_service_id, client_tgen_connect_port))
             if do_inet:
                 connect_ip = client_tgen_connect_ip if client_tgen_connect_ip != '0.0.0.0' else util.get_ip_address()
                 server_urls.append("{0}:{1}".format(connect_ip, client_tgen_connect_port))
