@@ -71,7 +71,7 @@ You must first satisfy the system/library requirements of each of the python mod
 # Fedora/RedHat:
 sudo yum install python-devel libxml2 libxml2-devel libxslt libxslt-devel libpng libpng-devel freetype freetype-devel
 # Ubuntu/Debian:
-sudo apt-get install python-devel libxml2 libxml2-dev libxslt1 libxslt1-dev libpng libpng-devel freetype freetype-devel
+sudo apt-get install python-dev libxml2 libxml2-dev libxslt1.1 libxslt1-dev libpng12-0 libpng12-dev libfreetype6 libfreetype6-dev
 ```
 
 It is recommended to use virtual environments to keep all of the dependencies self-contained and
