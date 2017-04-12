@@ -95,6 +95,12 @@ def which(program):
 def timestamp_to_seconds(stamp):  # unix timestamp
     return float(stamp)
 
+def date_to_string(date_object):
+    if date_object is not None:
+        return "{:04d}-{:02d}-{:02d}".format(date_object.year, date_object.month, date_object.day)
+    else:
+        return ""
+
 def do_dates_match(date1, date2):
     year_matches = True if date1.year == date2.year else False
     month_matches = True if date1.month == date2.month else False

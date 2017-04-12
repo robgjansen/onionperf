@@ -95,7 +95,7 @@ class Analysis(object):
             if self.date_filter is None:
                 filename = "onionperf.analysis.json.xz"
             else:
-                filename = "{0:04d}-{1:02d}-{2:02d}.onionperf.analysis.json.xz".format(self.date_filter.year, self.date_filter.month, self.date_filter.day)
+                filename = "{}.onionperf.analysis.json.xz".format(util.date_to_string(self.date_filter))
 
         filepath = os.path.abspath(os.path.expanduser("{0}/{1}".format(output_prefix, filename)))
         if not os.path.exists(output_prefix):
@@ -164,7 +164,7 @@ class Analysis(object):
             for filesize in xfers_by_filesize:
                 # build the filename
                 filename_prefix = "{}-{}".format(nickname, filesize)
-                filename_middle = "-{0:04d}-{1:02d}-{2:02d}".format(self.date_filter.year, self.date_filter.month, self.date_filter.day) if self.date_filter is not None else ""
+                filename_middle = "-{}".format(util.date_to_string(self.date_filter)) if self.date_filter is not None else ""
                 filename_suffix = ".tpf.xz" if do_compress else ".tpf"
                 filename = "{}{}{}".format(filename_prefix, filename_middle, filename_suffix)
 
@@ -182,7 +182,7 @@ class Analysis(object):
                         d = {}
 
                         d['SOURCE'] = nickname
-                        d['SOURCEADDRESS'] = self.measurement_ip
+                        d['SOURCEADDRESS'] = self.json_db['data'][nickname]['measurement_ip']
                         d['ENDPOINTLOCAL'] = xfer_db['endpoint_local']
                         d['ENDPOINTPROXY'] = xfer_db['endpoint_proxy']
                         d['ENDPOINTREMOTE'] = xfer_db['endpoint_remote']
@@ -204,6 +204,15 @@ class Analysis(object):
 
                         # since these are initialized to 0, it's OK if we are missing some times, e.g. due to read error
                         if 'unix_ts_start' in xfer_db:
+
+                            # if we need to filter by date and the download did not start on that date, skip it
+                            if self.date_filter is not None:
+                                start_datetime = datetime.datetime.utcfromtimestamp(xfer_db['unix_ts_start'])
+                                if start_datetime is not None:
+                                    if not util.do_dates_match(self.date_filter, start_datetime.date()):
+                                        logging.info("skipping download because start date {} does not match filter date {}".format(util.date_to_string(start_datetime.date()), util.date_to_string(self.date_filter)))
+                                        continue
+
                             d['START'] = ts_to_str(xfer_db['unix_ts_start'])
                             if 'elapsed_seconds' in xfer_db:
                                 if 'socket_create' in xfer_db['elapsed_seconds']:
@@ -225,7 +234,8 @@ class Analysis(object):
                                     # set DATAPERC[10,20,...,90]
                                     for decile in sorted(xfer_db['elapsed_seconds']['payload_progress'].keys()):
                                         if decile in xfer_db['elapsed_seconds']['payload_progress'] and xfer_db['elapsed_seconds']['payload_progress'][decile] is not None:
-                                            d['DATAPERC{0}'.format(int(decile * 100))] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
+                                            decile_as_int = int(float(decile) * 100)
+                                            d['DATAPERC{0}'.format(decile_as_int)] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['payload_progress'][decile])
 
                                 if 'last_byte' in xfer_db['elapsed_seconds']:
                                     d['DATACOMPLETE'] = ts_to_str(xfer_db['unix_ts_start'] + xfer_db['elapsed_seconds']['last_byte'])
