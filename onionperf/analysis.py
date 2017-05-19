@@ -138,7 +138,7 @@ class Analysis(object):
             analysis_instance.json_db = db
             return analysis_instance
 
-    def export_torperf_version_1_0(self, output_prefix=os.getcwd(), do_compress=False):
+    def export_torperf_version_1_1(self, output_prefix=os.getcwd(), do_compress=False):
         # export file in `@type torperf 1.0` format: https://collector.torproject.org/#type-torperf
         if not os.path.exists(output_prefix):
             os.makedirs(output_prefix)
@@ -260,7 +260,7 @@ class Analysis(object):
                                 d['USED_AT'] = stream_db['unix_ts_end']
                                 d['USED_BY'] = int(stream_db['stream_id'])
 
-                        output.write("@type torperf 1.0\r\n")
+                        output.write("@type torperf 1.1\r\n")
                         output_str = ' '.join("{0}={1}".format(k, d[k]) for k in sorted(d.keys()) if d[k] is not None).strip()
                         output.write("{0}\r\n".format(output_str))
                     except KeyError, e:

@@ -150,7 +150,7 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
 
                     # save the results in onionperf and torperf format in the twistd docroot
                     anal.save(output_prefix=docroot, do_compress=True)
-                    anal.export_torperf_version_1_0(output_prefix=docroot, do_compress=False)
+                    anal.export_torperf_version_1_1(output_prefix=docroot, do_compress=False)
 
                     # update the xml index in docroot
                     generate_docroot_index(docroot)

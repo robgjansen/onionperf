@@ -401,7 +401,7 @@ def analyze(args):
     analysis.analyze(args.do_simple, date_filter=args.date_filter)
     analysis.save(output_prefix=args.prefix)
     if args.save_torperf:
-        analysis.export_torperf_version_1_0(output_prefix=args.prefix, do_compress=False)
+        analysis.export_torperf_version_1_1(output_prefix=args.prefix, do_compress=False)
 
 def visualize(args):
     from onionperf.visualization import TGenVisualization, TorVisualization
