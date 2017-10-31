@@ -107,7 +107,7 @@ def main():
         help="""the Tor control port number N""",
         metavar="N", type=type_nonnegative_integer,
         action="store", dest="ctlport",
-        default=9050)
+        default=9051)
 
     monitor_parser.add_argument('-l', '--log',
         help="""a file PATH to log Tor controller output, may be '-' for STDOUT""",
