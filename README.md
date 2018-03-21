@@ -209,7 +209,7 @@ The analysis also produces a `.tpf` file in the standard Torperf format
 the `json` file. This file is produced to increase interoperability with existing
 tools written to process Torperf measurement results. More information regarding
 how to read Torperf's measurements results can be found at:
-https://collector.torproject.org/#torperf.
+https://metrics.torproject.org/collector.html#torperf.
 
 The daily generated `json` and `tpf` files are placed in the twistd docroot and are
 available through the web interface at the configured port (`localhost:8081` by default)
