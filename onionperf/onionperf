@@ -145,12 +145,6 @@ def main():
         action="store", dest="tgenpath",
         default=util.which("tgen"))
 
-    measure_parser.add_argument('--twistd',
-        help="""a file PATH to a twistd binary""",
-        metavar="PATH", type=type_str_path_in,
-        action="store", dest="twistdpath",
-        default=util.which("twistd"))
-
     measure_parser.add_argument('--tgen-connect-ip',
         help="""the TGen client connect IP address ADDR, or 0.0.0.0 to do an external IP lookup; must be Internet-accessible for non-onion downloads to work""",
         metavar="ADDR", type=type_str_ip_in,
@@ -168,12 +162,6 @@ def main():
         metavar="N", type=type_nonnegative_integer,
         action="store", dest="tgenconnectport",
         default=8080)
-
-    measure_parser.add_argument('--twistd-port',
-        help="""the Twistd web server port number N, where OnionPerf results can be fetched""",
-        metavar="N", type=type_nonnegative_integer,
-        action="store", dest="twistdport",
-        default=8081)
 
     measure_parser.add_argument('-i', '--no-inet',
         help="""disable measuring download times over Tor back to {0}""".format(hostname),
@@ -353,10 +341,9 @@ def measure(args):
     # check paths
     args.torpath = util.find_path(args.torpath, "tor")
     if args.torpath is not None: args.tgenpath = util.find_path(args.tgenpath, "tgen")
-    if args.torpath is not None and args.tgenpath is not None: args.twistdpath = util.find_path(args.twistdpath, "twistd")
 
     # validate paths and run
-    if args.torpath is not None and args.tgenpath is not None and args.twistdpath is not None:
+    if args.torpath is not None and args.tgenpath is not None:
         os.chdir(args.prefix)
         if args.model:
             # load custom model instead of Torperf model
@@ -375,12 +362,11 @@ def measure(args):
         server_tgen_port = args.tgenlistenport
         server_tor_ctl_port = util.get_random_free_port()
         server_tor_socks_port = util.get_random_free_port()
-        twistd_port = args.twistdport
 
-        meas = Measurement(args.torpath, args.tgenpath, args.twistdpath, args.prefix, args.nickname)
+        meas = Measurement(args.torpath, args.tgenpath, args.prefix, args.nickname)
         meas.run(do_onion=args.do_onion, do_inet=args.do_inet,
              client_tgen_listen_port=client_tgen_port, client_tgen_connect_ip=client_connect_ip, client_tgen_connect_port=client_connect_port, client_tor_ctl_port=client_tor_ctl_port, client_tor_socks_port=client_tor_socks_port,
-             server_tgen_listen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port, twistd_port=twistd_port)
+             server_tgen_listen_port=server_tgen_port, server_tor_ctl_port=server_tor_ctl_port, server_tor_socks_port=server_tor_socks_port)
     else:
         logging.info("Please fix path errors to continue")
 

@@ -1,6 +1,6 @@
 # DB Structure
 
-This document describes the structure of the json database file that gets exported in `analysis` mode and gets placed in the twistd docroot when running in `measure` mode.
+This document describes the structure of the json database file that gets exported in `analysis` mode and gets placed in the www docroot when running in `measure` mode.
 
 The structure is given here with variable keys marked as such.
 

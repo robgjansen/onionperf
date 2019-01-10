@@ -40,7 +40,7 @@ sudo apt-get install gcc cmake make libglib2.0 libglib2.0-dev libigraph0 libigra
 
 ### Install Python modules
 
-  + **OnionPerf** python modules: stem (>= v1.4.0), twisted, lxml, networkx, numpy, matplotlib.
+  + **OnionPerf** python modules: stem (>= v1.4.0), lxml, networkx, numpy, matplotlib.
 
 #### Option 1: Package Manager
 
@@ -48,9 +48,9 @@ The easiest way to satisfy all system dependencies is to use a package manager.
 
 ```
 # Fedora/RedHat:
-sudo yum install python-stem python-twisted python-lxml python-networkx python-matplotlib numpy scipy
+sudo yum install python-stem python-lxml python-networkx python-matplotlib numpy scipy
 # Ubuntu/Debian:
-sudo apt-get install python-stem python-twisted python-lxml python-networkx python-matplotlib python-numpy python-scipy
+sudo apt-get install python-stem python-lxml python-networkx python-matplotlib python-numpy python-scipy
 ```
 
 #### Option 2: pip
@@ -59,7 +59,7 @@ Python modules can also be installed using `pip`. The python modules that are re
 OnionPerf subcommand are as follows:
 
   + `onionperf monitor`: stem
-  + `onionperf measure`: stem, lxml, twisted, networkx
+  + `onionperf measure`: stem, lxml, networkx
   + `onionperf analyze`: stem
   + `onionperf visualize`: scipy, numpy, pylab, matplotlib
 
@@ -88,7 +88,7 @@ deactivate
 If you don't want to use virtualenv, you can install with:
 
 ```
-pip install stem lxml twisted networkx scipy numpy matplotlib
+pip install stem lxml networkx scipy numpy matplotlib
 ```
 
 **Note**: You may want to skip installing numpy and matplotlib if you don't
@@ -165,19 +165,17 @@ onionperf -h
 ### Measure Tor
 
 To run in measure mode, you will need to give OnionPerf the path to your custom
-'tor', 'tgen', and 'twistd' binary files if they do not exist in your PATH
+'tor' and 'tgen' binary files if they do not exist in your PATH
 environment variable.
 
 ```
 ./onionperf measure --tor=/home/rob/tor/src/or/tor \
---tgen=/home/rob/shadow/src/plugin/shadow-plugin-tgen/build/tgen --twistd=/usr/bin/twistd
+--tgen=/home/rob/shadow/src/plugin/shadow-plugin-tgen/build/tgen
 ```
 
-This will run OnionPerf in measure mode with default ports; a TGen server runs on
-port 8080 and a Twisted web server runs on port 8081. Port 8080 **must** be open on
-your firewall if you want to do performance measurements with downloads that exit
-the Tor network. You should also open port 8081 if you want the data that OnionPerf
-gathers to be publicly accessible.
+This will run OnionPerf in measure mode with default ports; a TGen server runs
+on port 8080. Port 8080 **must** be open on your firewall if you want to do
+performance measurements with downloads that exit the Tor network.
 
 By default, OnionPerf will run a TGen client/server pair that transfer traffic
 through Tor and through an ephemeral onion service started by OnionPerf. TGen and Tor
@@ -187,7 +185,7 @@ control port and logged to disk.
 
 While running, OnionPerf log output is saved to component-specific log files.
 Log files for each OnionPerf component (tgen client, tgen server, tor client, tor
-server, twistd server) are stored in their own directory, under `onionperf-data`:
+server) are stored in their own directory, under `onionperf-data`:
 
  + `tgen-client/onionperf.tgen.log`
  + `tgen-server/onionperf.tgen.log`
@@ -195,7 +193,6 @@ server, twistd server) are stored in their own directory, under `onionperf-data`
  + `tor-client/onionperf.tor.log`
  + `tor-server/onionperf.torctl.log`
  + `tor-server/onionperf.tor.log`
- + `twistd/onionperf.twisted.log`
 
 Every night at 11:59 UTC, OnionPerf will analyze the latest results from these log
 files using the same parsing functions that are used in the `onionperf analyze`
@@ -211,9 +208,9 @@ tools written to process Torperf measurement results. More information regarding
 how to read Torperf's measurements results can be found at:
 https://metrics.torproject.org/collector.html#torperf.
 
-The daily generated `json` and `tpf` files are placed in the twistd docroot and are
-available through the web interface at the configured port (`localhost:8081` by default)
-or on the local filesystem in the `onionperf-data/twistd/docroot` directory.
+The daily generated `json` and `tpf` files are placed in the web docroot and are
+available through the local filesystem in the `onionperf-data/htdocs` directory.
+These files can be shared via a web server such as Apache or nginx.
 
 Once the analysis is complete, OnionPerf will rotate all log files; each log file
 is moved to a `log_rotate` subdirectory and renamed to include a timestamp. Each

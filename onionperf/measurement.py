@@ -148,7 +148,7 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
                     # run the analysis, i.e. parse the files
                     anal.analyze(do_simple=False, date_filter=next_midnight.date())
 
-                    # save the results in onionperf and torperf format in the twistd docroot
+                    # save the results in onionperf and torperf format in the www docroot
                     anal.save(output_prefix=docroot, do_compress=True)
                     anal.export_torperf_version_1_1(output_prefix=docroot, do_compress=False)
 
@@ -162,27 +162,26 @@ def logrotate_thread_task(writables, tgen_writable, torctl_writable, docroot, ni
 
 class Measurement(object):
 
-    def __init__(self, tor_bin_path, tgen_bin_path, twistd_bin_path, datadir_path, nickname):
+    def __init__(self, tor_bin_path, tgen_bin_path, datadir_path, nickname):
         self.tor_bin_path = tor_bin_path
         self.tgen_bin_path = tgen_bin_path
-        self.twistd_bin_path = twistd_bin_path
         self.datadir_path = datadir_path
         self.nickname = nickname
         self.threads = None
         self.done_event = None
         self.hs_service_id = None
-        self.twisted_docroot = None
+        self.www_docroot = "{0}/htdocs".format(self.datadir_path)
 
     def run(self, do_onion=True, do_inet=True, client_tgen_listen_port=58888, client_tgen_connect_ip='0.0.0.0', client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
-             server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080):
+             server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001):
         '''
-        only `server_tgen_listen_port` and `twistd_port` are "public" and need to be opened on the firewall.
+        only `server_tgen_listen_port` are "public" and need to be opened on the firewall.
         if `client_tgen_connect_port` != `server_tgen_listen_port`, then you should have installed a forwarding rule in the firewall.
         all ports need to be unique though, and unique among multiple onionperf instances.
 
         here are some sane defaults:
         client_tgen_listen_port=58888, client_tgen_connect_port=8080, client_tor_ctl_port=59050, client_tor_socks_port=59000,
-        server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001, twistd_port=50080
+        server_tgen_listen_port=8080, server_tor_ctl_port=59051, server_tor_socks_port=59001
         '''
         self.threads = []
         self.done_event = threading.Event()
@@ -230,14 +229,13 @@ class Measurement(object):
                 assert len(server_urls) > 0
 
                 tgen_client_writable = self.__start_tgen_client(server_urls, client_tgen_listen_port, client_tor_socks_port)
-                general_writables.append(self.__start_twistd(twistd_port))
 
                 self.__start_log_processors(general_writables, tgen_client_writable, torctl_client_writable)
 
                 logging.info("Bootstrapping finished, entering heartbeat loop")
                 time.sleep(1)
                 while True:
-                    # TODO add status update of some kind? maybe the number of files in the twistd directory?
+                    # TODO add status update of some kind? maybe the number of files in the www directory?
                     # logging.info("Heartbeat: {0} downloads have completed successfully".format(self.__get_download_count(tgen_client_writable.filename)))
 
                     if self.__is_alive():
@@ -280,7 +278,7 @@ class Measurement(object):
 
     def __start_log_processors(self, general_writables, tgen_writable, torctl_writable):
         # rotate the log files, and then parse out the torperf measurement data
-        logrotate_args = (general_writables, tgen_writable, torctl_writable, self.twisted_docroot, self.nickname, self.done_event)
+        logrotate_args = (general_writables, tgen_writable, torctl_writable, self.www_docroot, self.nickname, self.done_event)
         logrotate = threading.Thread(target=logrotate_thread_task, name="logrotate", args=logrotate_args)
         logrotate.start()
         self.threads.append(logrotate)
@@ -316,30 +314,6 @@ class Measurement(object):
         self.threads.append(tgen_watchdog)
 
         return tgen_writable
-
-    def __start_twistd(self, twistd_port):
-        logging.info("Starting Twistd server process on port {0}...".format(twistd_port))
-
-        twisted_datadir = "{0}/twistd".format(self.datadir_path)
-        if not os.path.exists(twisted_datadir): os.makedirs(twisted_datadir)
-
-        twisted_logpath = "{0}/onionperf.twisted.log".format(twisted_datadir)
-        twisted_writable = util.FileWritable(twisted_logpath)
-        logging.info("Logging Twisted process output to {0}".format(twisted_logpath))
-
-        twisted_docroot = "{0}/docroot".format(twisted_datadir)
-        if not os.path.exists(twisted_docroot): os.makedirs(twisted_docroot)
-        generate_docroot_index(twisted_docroot)
-        self.twisted_docroot = twisted_docroot
-
-        twisted_cmd = "{0} -n -l - web --port {1} --path {2} --mime-type=None".format(self.twistd_bin_path, twistd_port, twisted_docroot)
-        twisted_args = (twisted_cmd, twisted_datadir, twisted_writable, self.done_event, None, None, None)
-        twisted_watchdog = threading.Thread(target=watchdog_thread_task, name="twistd_watchdog", args=twisted_args)
-        twisted_watchdog.start()
-        self.threads.append(twisted_watchdog)
-        logging.info("Twistd web server running at 0.0.0.0:{0}".format(twistd_port))
-
-        return twisted_writable
 
     def __start_tor_client(self, control_port, socks_port):
         return self.__start_tor("client", control_port, socks_port)
