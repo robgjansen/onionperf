@@ -1,3 +1,15 @@
+# :bangbang: ARCHIVAL NOTICE - 2019-02-26 :bangbang:
+
+The OnionPerf project has **transitioned to the Tor Project**:
+
+:heavy_check_mark: Development will continue at the new official repository: https://gitweb.torproject.org/onionperf.git  
+:heavy_check_mark: Feature requests or other issues can be reported on trac: https://trac.torproject.org/  
+:heavy_check_mark: Pull requests may also be submitted at Tor's GitHub fork: https://github.com/torproject/onionperf
+
+Therefore, this repository has been archived and **no further development updates will be posted here**.
+
+-----
+
 # OnionPerf
 
 OnionPerf is a utility to track Tor and onion service performance.
